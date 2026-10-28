@@ -1,0 +1,88 @@
+// Pantalla «Progreso»: objetivos por habilidad y estado, y tus
+// últimas evidencias. No convierte minutos ni rachas en niveles MCER.
+import { SKILLS, STATUSES, statusLabel } from '../config.js';
+import { h, chips, section, empty } from '../dom.js';
+import { formatShort } from '../dates.js';
+import { parseRegistro } from '../registro.js';
+import { skillBadge, clip } from '../components.js';
+
+const filters = { skill: '' };
+
+export function collectEvidence(data) {
+  const out = [];
+  const objectives = new Map(data.objectives.map((o) => [o.id, o]));
+  for (const o of data.objectives) {
+    for (const e of o.history) {
+      out.push({ at: e.at, skill: o.skill, objective: o.title, type: 'Cambio de estado', text: `${e.from ? statusLabel(e.from) : '—'} → ${statusLabel(e.to)}. ${e.reason}`, href: `#/objetivos/${o.id}` });
+    }
+  }
+  for (const s of data.sessions) {
+    if (!s.closing.achievement.trim()) continue;
+    const o = objectives.get(s.objectiveId);
+    out.push({ at: s.closedAt || s.updatedAt, skill: o?.skill || '', objective: o?.title || '', type: 'Logro de una sesión', text: s.closing.achievement, href: `#/sesion/${s.id}` });
+  }
+  for (const c of data.conversations) {
+    if (!c.registro.trim()) continue;
+    const parsed = parseRegistro(c.registro);
+    const o = objectives.get(c.objectiveId);
+    out.push({
+      at: c.registroAt || c.updatedAt,
+      skill: o?.skill || parsed.skill || '',
+      objective: o?.title || '',
+      type: 'Conversación (REGISTRO)',
+      text: parsed.fields.evidencia || parsed.fields.logro || c.registro,
+      href: `#/conversacion/${c.id}`,
+    });
+  }
+  return out.sort((a, b) => b.at.localeCompare(a.at));
+}
+
+export function render(main, ctx) {
+  const data = ctx.sync.data;
+  const content = h('div', {});
+  const paint = () => {
+    content.replaceChildren();
+    const skills = SKILLS.filter((s) => !filters.skill || s.id === filters.skill);
+
+    // Objetivos por habilidad y estado
+    const grid = h('div', { class: 'skill-grid' });
+    for (const skill of skills) {
+      const objs = data.objectives.filter((o) => o.skill === skill.id);
+      const rows = STATUSES.map((st) => {
+        const n = objs.filter((o) => o.status === st.id).length;
+        const bar = h('span', { class: `bar-fill status-${st.id}` });
+        bar.style.width = objs.length ? `${Math.round((n / objs.length) * 100)}%` : '0%';
+        return h('div', { class: 'bar-row' }, h('span', { class: 'bar-label', text: st.label }), h('span', { class: 'bar' }, bar), h('span', { class: 'bar-count', text: String(n) }));
+      });
+      grid.append(h('article', { class: 'card' }, h('h3', { text: `${skill.label} · ${objs.length} ${objs.length === 1 ? 'objetivo' : 'objetivos'}` }), ...rows));
+    }
+    content.append(h('h2', { class: 'section-title', text: 'Objetivos por habilidad y estado' }), grid);
+
+    // Últimas evidencias
+    const evidence = collectEvidence(data).filter((e) => !filters.skill || e.skill === filters.skill).slice(0, 25);
+    content.append(
+      section(
+        'Últimas evidencias',
+        evidence.length
+          ? h('ol', { class: 'timeline' },
+              evidence.map((e) =>
+                h('li', {},
+                  h('p', { class: 'item-meta' }, `${formatShort(e.at)} · ${e.type}`, e.skill ? ' · ' : '', e.skill ? skillBadge(e.skill) : null),
+                  e.objective ? h('p', { class: 'item-title', text: e.objective }) : null,
+                  h('p', { class: 'pre', text: clip(e.text, 400) }),
+                  h('a', { class: 'link', href: e.href, text: 'Ver' }),
+                ),
+              ),
+            )
+          : empty('Todavía no hay evidencias. Aparecerán al cerrar sesiones con un logro, guardar registros de conversación o cambiar estados.'),
+      ),
+    );
+  };
+  main.append(
+    h('h1', { text: 'Progreso' }),
+    h('p', { class: 'subtitle', text: 'Tus objetivos y evidencias. Esto no es un nivel MCER: el tiempo y la constancia no se convierten en niveles.' }),
+    h('div', { class: 'toolbar' }, chips([{ value: '', label: 'Todas' }, ...SKILLS.map((s) => ({ value: s.id, label: s.label }))], filters.skill, (v) => ((filters.skill = v), paint()), { label: 'Filtrar por habilidad' })),
+    content,
+  );
+  paint();
+}
