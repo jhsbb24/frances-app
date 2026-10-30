@@ -10,7 +10,8 @@
 //   cards:         tarjetas de repaso
 // }
 // ─────────────────────────────────────────────────────────────
-import { BOOKS, DURATIONS, SKILLS, STATUSES, DIFFICULTIES } from './config.js';
+import { BOOKS, DURATIONS, SKILLS, STATUSES, DIFFICULTIES, SESSION_PLAN } from './config.js';
+import { formatShort } from './dates.js';
 import { firstDue } from './review.js';
 
 export const SCHEMA_VERSION = 1;
@@ -58,6 +59,7 @@ export function newSession({ minutes, objectiveId, ref }, now = nowIso()) {
     ref: { ...emptyRef(), ...ref },
     draft: '',
     attempt1: '',
+    feedback: '', // correcciones recibidas entre el primer y el segundo intento
     attempt2: '',
     closing: { achievement: '', difficulty: '', nextStep: '' },
     timer: { elapsedMs: 0, runningSince: now },
@@ -121,6 +123,38 @@ export const isRunning = (session) => Boolean(session.timer?.runningSince);
 export function pauseTimer(session, nowMs = Date.now()) {
   if (!isRunning(session)) return;
   session.timer = { elapsedMs: elapsedMs(session, nowMs), runningSince: null };
+}
+
+/** Fase del plan sugerido según los minutos que llevas. */
+export function currentPhase(minutes, elapsedMinutes) {
+  const plan = SESSION_PLAN[minutes] || SESSION_PLAN[30];
+  let end = 0;
+  for (let i = 0; i < plan.length; i++) {
+    end += plan[i][1];
+    if (elapsedMinutes < end) return { index: i, name: plan[i][0], endsAt: end };
+  }
+  return { index: plan.length, name: '', endsAt: end };
+}
+
+/** La sesión entera como texto (para copiarla y compartirla). */
+export function sessionAsText(s, data) {
+  const parts = [`Sesión del ${formatShort(s.createdAt)} · ${s.minutes} min`];
+  const objective = objectiveTitle(data, s.objectiveId);
+  if (objective) parts.push(`Objetivo: ${objective}`);
+  if (refText(s.ref)) parts.push(`Referencia: ${refText(s.ref)}`);
+  const block = (title, text) => text.trim() && parts.push('', `${title}:`, text.trim());
+  block('Borrador', s.draft);
+  block('Primer intento', s.attempt1);
+  block('Correcciones', s.feedback);
+  block('Segundo intento', s.attempt2);
+  const c = s.closing;
+  if (c.achievement || c.difficulty || c.nextStep) {
+    parts.push('', 'Cierre:');
+    if (c.achievement.trim()) parts.push(`- Logro: ${c.achievement.trim()}`);
+    if (c.difficulty.trim()) parts.push(`- Dificultad: ${c.difficulty.trim()}`);
+    if (c.nextStep.trim()) parts.push(`- Siguiente paso: ${c.nextStep.trim()}`);
+  }
+  return parts.join('\n');
 }
 
 // ── Textos para mostrar ───────────────────────────────────────
@@ -205,6 +239,7 @@ function normSession(item) {
     ref: normRef(s.ref),
     draft: str(s.draft),
     attempt1: str(s.attempt1),
+    feedback: str(s.feedback),
     attempt2: str(s.attempt2),
     closing: { achievement: str(closing.achievement), difficulty: str(closing.difficulty), nextStep: str(closing.nextStep) },
     timer: { elapsedMs: Math.max(0, Number(timer.elapsedMs) || 0), runningSince: iso(timer.runningSince) },

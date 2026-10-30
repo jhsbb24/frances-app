@@ -2,11 +2,14 @@
 // últimas evidencias. No convierte minutos ni rachas en niveles MCER.
 import { SKILLS, STATUSES, statusLabel } from '../config.js';
 import { h, chips, section, empty } from '../dom.js';
-import { formatShort } from '../dates.js';
+import { formatShort, formatDay, today } from '../dates.js';
+import { weeklyActivity, unitsWorked, recentDifficulties } from '../insights.js';
 import { parseRegistro } from '../registro.js';
 import { skillBadge, clip } from '../components.js';
 
 const filters = { skill: '' };
+
+const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
 export function collectEvidence(data) {
   const out = [];
@@ -75,6 +78,59 @@ export function render(main, ctx) {
               ),
             )
           : empty('Todavía no hay evidencias. Aparecerán al cerrar sesiones con un logro, guardar registros de conversación o cambiar estados.'),
+      ),
+    );
+
+    // Lo que más te cuesta últimamente
+    const objectives = new Map(data.objectives.map((o) => [o.id, o]));
+    const skillOf = (href) => {
+      const [, kind, id] = href.split('/');
+      const item = kind === 'sesion' ? data.sessions.find((x) => x.id === id) : data.conversations.find((x) => x.id === id);
+      return objectives.get(item?.objectiveId)?.skill || '';
+    };
+    const hard = recentDifficulties(data, 20).filter((d) => !filters.skill || skillOf(d.href) === filters.skill).slice(0, 8);
+    content.append(
+      section(
+        'Dificultades y prioridades recientes',
+        h('p', { class: 'hint', text: 'De tus cierres de sesión y de los REGISTROS. Si algo se repite, conviértelo en objetivo o en tarjetas.' }),
+        hard.length
+          ? h('ul', { class: 'plain-list' }, hard.map((d) => h('li', {}, h('span', { class: 'item-meta', text: `${formatShort(d.at)} · ${d.kind}: ` }), d.text, ' ', h('a', { class: 'link', href: d.href, text: 'Ver' }))))
+          : empty('Todavía no hay dificultades anotadas.'),
+      ),
+    );
+
+    // Unidades de Édito trabajadas (no depende del filtro)
+    const units = unitsWorked(data);
+    const books = Object.keys(units).sort();
+    content.append(
+      section(
+        'Unidades de Édito trabajadas',
+        books.length
+          ? books.map((book) =>
+              h('div', {},
+                h('h3', { text: `Édito ${book}` }),
+                h('ul', { class: 'plain-list' },
+                  units[book].map((u) =>
+                    h('li', {}, h('strong', { text: `Unidad ${u.unit}` }), ` · ${count(u.sessions, 'sesión', 'sesiones')}, ${count(u.conversations, 'conversación', 'conversaciones')} · última: ${formatShort(u.last)}`),
+                  ),
+                ),
+              ),
+            )
+          : empty('Aparecerán cuando anotes libro y unidad en tus sesiones o conversaciones.'),
+      ),
+    );
+
+    // Actividad por semana: solo recuentos, sin niveles ni rachas
+    const weeks = weeklyActivity(data, today(), 8);
+    content.append(
+      section(
+        'Actividad de las últimas semanas',
+        h('p', { class: 'hint', text: 'Recuento de lunes a domingo (todas las habilidades). Sirve para ver tu ritmo, no mide tu nivel.' }),
+        h('ul', { class: 'plain-list' },
+          weeks.map((w, i) =>
+            h('li', {}, h('strong', { text: i === 0 ? 'Esta semana' : `Semana del ${formatDay(w.start, { weekday: false })}` }), `: ${count(w.sessions, 'sesión', 'sesiones')} · ${count(w.conversations, 'conversación', 'conversaciones')} · ${count(w.reviews, 'repaso', 'repasos')}`),
+          ),
+        ),
       ),
     );
   };

@@ -1,10 +1,23 @@
 // Pantalla «Objetivos»: cada objetivo tiene una habilidad y un
 // estado. Cambiar de estado pide un motivo y queda en el historial.
-import { SKILLS, STATUSES, statusLabel } from '../config.js';
-import { h, chips, groupLabel, textField, section, empty, button, toast, confirmDialog, openDialog } from '../dom.js';
-import { formatShort, formatDateTime } from '../dates.js';
+import { SKILLS, STATUSES, statusLabel, statusHelp } from '../config.js';
+import { h, chips, groupLabel, textField, section, empty, button, linkButton, toast, confirmDialog, openDialog } from '../dom.js';
+import { formatShort, formatDateTime, today, dayKey, relativeDay } from '../dates.js';
 import { newObjective, nowIso } from '../model.js';
+import { lastActivity, practiceCounts } from '../insights.js';
 import { skillBadge, statusBadge, openStatusDialog, short, notFound, byCreatedDesc } from '../components.js';
+import { createConversation } from './conversacion.js';
+
+/** «Última práctica: hace 3 días · 2 sesiones · 1 conversación» */
+function practiceSummary(data, objectiveId) {
+  const last = lastActivity(data, objectiveId);
+  const { sessions, conversations } = practiceCounts(data, objectiveId);
+  if (!last) return 'Sin practicar todavía';
+  const parts = [`Última práctica: ${relativeDay(dayKey(new Date(last)), today())}`];
+  if (sessions) parts.push(`${sessions} ${sessions === 1 ? 'sesión' : 'sesiones'}`);
+  if (conversations) parts.push(`${conversations} ${conversations === 1 ? 'conversación' : 'conversaciones'}`);
+  return parts.join(' · ');
+}
 
 const filters = { skill: '' };
 
@@ -32,9 +45,13 @@ function renderList(main, ctx) {
       if (!items.length) continue;
       groups.append(
         section(`${st.label} (${items.length})`,
+          h('p', { class: 'hint', text: st.help }),
           ...items.map((o) =>
             h('a', { class: 'item link-item', href: `#/objetivos/${o.id}` },
-              h('div', { class: 'item-main' }, h('p', { class: 'item-title', text: o.title || 'Sin título' }), h('p', { class: 'item-meta' }, skillBadge(o.skill))),
+              h('div', { class: 'item-main' },
+                h('p', { class: 'item-title', text: o.title || 'Sin título' }),
+                h('p', { class: 'item-meta' }, skillBadge(o.skill), ` ${practiceSummary(data, o.id)}`),
+              ),
             ),
           ),
         ),
@@ -102,7 +119,13 @@ function renderDetail(main, ctx, id) {
     section(
       'Estado',
       h('p', {}, statusBadge(o.status), ' ', skillBadge(o.skill)),
-      button('Cambiar estado…', () => openStatusDialog(ctx, id, { onDone: () => ctx.rerender() }), 'primary'),
+      h('p', { class: 'hint', text: `${statusHelp(o.status)} ${practiceSummary(data, id)}.` }),
+      o.description.trim() ? h('p', {}, h('strong', { text: 'Cómo sabré que lo logré: ' }), o.description.trim()) : null,
+      h('div', { class: 'row-actions' },
+        button('Cambiar estado…', () => openStatusDialog(ctx, id, { onDone: () => ctx.rerender() }), 'primary'),
+        linkButton('Empezar sesión', `#/sesion/nueva/objetivo/${id}`, 'secondary'),
+        button('Preparar conversación', () => ctx.go(`#/conversacion/${createConversation(ctx, { objectiveId: id })}`), 'secondary'),
+      ),
     ),
   );
 
@@ -118,6 +141,7 @@ function renderDetail(main, ctx, id) {
                 h('p', { class: 'item-meta', text: `${formatDateTime(e.at)} · ${e.from ? statusLabel(e.from) : '—'} → ${statusLabel(e.to)}` }),
                 h('p', { class: 'pre', text: e.reason }),
                 e.source?.type === 'conversation' ? h('a', { class: 'link', href: `#/conversacion/${e.source.id}`, text: 'Ver la conversación' }) : null,
+                e.source?.type === 'session' ? h('a', { class: 'link', href: `#/sesion/${e.source.id}`, text: 'Ver la sesión' }) : null,
               ),
             ),
           )

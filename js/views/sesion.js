@@ -1,35 +1,40 @@
 // Pantalla «Sesión»: elegir 15, 30 o 40 minutos y un objetivo,
-// referencia de Édito, borrador, primer y segundo intento,
-// tarjetas para repasar y un cierre corto. Se puede pausar y
-// retomar sin llenar todo.
-import { DURATIONS } from '../config.js';
-import { h, chips, groupLabel, textField, section, empty, linkButton, button, confirmDialog, toast } from '../dom.js';
+// referencia de Édito, borrador, primer intento, corrección
+// (opcional, con ChatGPT), segundo intento, tarjetas para repasar
+// y un cierre corto. Se puede pausar y retomar sin llenar todo.
+import { DURATIONS, SESSION_PLAN, CHATGPT_URL, statusLabel } from '../config.js';
+import { h, chips, groupLabel, textField, section, empty, linkButton, button, confirmDialog, toast, copyText, externalLink } from '../dom.js';
 import { formatShort, formatDateTime, formatClock, relativeDay } from '../dates.js';
-import { newSession, newObjective, emptyRef, objectiveTitle, refText, remainingMs, isRunning, pauseTimer, nowIso } from '../model.js';
-import { refEditor, objectivePicker, NEW_OBJECTIVE, cardQuickForm, byCreatedDesc, byUpdatedDesc, short, notFound, CARD_KINDS, openCardDialog } from '../components.js';
+import { newSession, newObjective, emptyRef, objectiveTitle, refText, remainingMs, elapsedMs, isRunning, pauseTimer, currentPhase, sessionAsText, nowIso } from '../model.js';
+import { buildPrompt, CORRECTION_TEMPLATE, objectiveValues, splitCorrections, plain } from '../registro.js';
+import { refEditor, objectivePicker, NEW_OBJECTIVE, cardQuickForm, byCreatedDesc, byUpdatedDesc, short, clip, notFound, CARD_KINDS, openCardDialog, openStatusDialog, openBulkCardsDialog } from '../components.js';
 import { createConversation } from './conversacion.js';
 
 export function render(main, ctx, params) {
-  const [sub] = params;
+  const [sub, ...rest] = params;
   const data = ctx.sync.data;
-  if (sub === 'nueva') return renderNew(main, ctx);
+  if (sub === 'nueva') return renderNew(main, ctx, rest);
   if (sub) {
     if (!data.sessions.some((s) => s.id === sub)) return notFound(main, 'No encuentro esta sesión. Quizá se borró en otro dispositivo.', '#/sesiones', 'Ver mis sesiones');
     return renderSession(main, ctx, sub);
   }
   const open = data.sessions.filter((s) => !s.closedAt);
   if (open.length === 1) return renderSession(main, ctx, open[0].id);
-  if (open.length === 0) return renderNew(main, ctx);
+  if (open.length === 0) return renderNew(main, ctx, []);
   return renderList(main, ctx);
 }
 
+/** Todo el texto de una sesión, para buscar en ella. */
+const sessionText = (s, data) =>
+  plain([objectiveTitle(data, s.objectiveId), refText(s.ref), s.draft, s.attempt1, s.feedback, s.attempt2, s.closing.achievement, s.closing.difficulty, s.closing.nextStep].join(' '));
+
 // ── Lista de sesiones ─────────────────────────────────────────
+
+const listFilter = { text: '' };
 
 export function renderList(main, ctx) {
   const data = ctx.sync.data;
-  main.append(h('h1', { text: 'Sesiones' }), linkButton('Nueva sesión', '#/sesion/nueva', 'primary big block'));
-  const open = data.sessions.filter((s) => !s.closedAt).sort(byUpdatedDesc);
-  const closed = data.sessions.filter((s) => s.closedAt).sort(byCreatedDesc);
+  const results = h('div', {});
   const item = (s) =>
     h('a', { class: 'item link-item', href: `#/sesion/${s.id}` },
       h('div', { class: 'item-main' },
@@ -38,17 +43,47 @@ export function renderList(main, ctx) {
         s.closing.achievement ? h('p', { class: 'item-text', text: `Logro: ${short(s.closing.achievement, 120)}` }) : null,
       ),
     );
-  if (open.length) main.append(section('Abiertas', ...open.map(item)));
-  main.append(section('Anteriores', closed.length ? closed.slice(0, 60).map(item) : empty('Todavía no has cerrado ninguna sesión.')));
+  const paint = () => {
+    const words = plain(listFilter.text).split(/\s+/).filter(Boolean);
+    const match = (s) => !words.length || words.every((w) => sessionText(s, data).includes(w));
+    const open = data.sessions.filter((s) => !s.closedAt && match(s)).sort(byUpdatedDesc);
+    const closed = data.sessions.filter((s) => s.closedAt && match(s)).sort(byCreatedDesc);
+    results.replaceChildren();
+    if (open.length) results.append(section('Abiertas', ...open.map(item)));
+    const none = words.length ? 'Ninguna sesión contiene ese texto.' : 'Todavía no has cerrado ninguna sesión.';
+    results.append(section('Anteriores', closed.length ? closed.slice(0, 80).map(item) : empty(none)));
+  };
+  const search = h('input', { type: 'search', id: 'sesiones-buscar', placeholder: 'Buscar en tus sesiones (texto, unidad, objetivo…)', autocomplete: 'off', 'aria-label': 'Buscar en tus sesiones' });
+  search.value = listFilter.text;
+  search.addEventListener('input', () => ((listFilter.text = search.value), paint()));
+  main.append(h('h1', { text: 'Sesiones' }), linkButton('Nueva sesión', '#/sesion/nueva', 'primary big block'), h('div', { class: 'toolbar' }, search), results);
+  paint();
 }
 
 // ── Nueva sesión ──────────────────────────────────────────────
 
-function renderNew(main, ctx) {
+/**
+ * Formulario de sesión nueva. Se puede abrir ya rellenado:
+ * #/sesion/nueva/objetivo/<id>  o  #/sesion/nueva/referencia/<id>
+ */
+function renderNew(main, ctx, params) {
   const data = ctx.sync.data;
+  const [what, preId] = params;
   const last = [...data.sessions].sort(byCreatedDesc)[0];
-  const lastObjective = last && data.objectives.some((o) => o.id === last.objectiveId && o.status !== 'transferido') ? last.objectiveId : '';
-  const form = { minutes: last?.minutes || 30, objectiveId: lastObjective, newObjective: null, ref: emptyRef() };
+  const usable = (id) => data.objectives.some((o) => o.id === id && o.status !== 'transferido');
+  let objectiveId = last && usable(last.objectiveId) ? last.objectiveId : '';
+  if (what === 'objetivo' && data.objectives.some((o) => o.id === preId)) objectiveId = preId;
+
+  let ref = emptyRef();
+  let refHint = '';
+  const libRef = what === 'referencia' && data.references.find((r) => r.id === preId);
+  if (libRef) {
+    ref = { ...emptyRef(), refId: libRef.id, book: libRef.book, unit: libRef.unit, page: libRef.page };
+  } else if (last && refText(last.ref)) {
+    ref = { ...emptyRef(), refId: last.ref.refId, book: last.ref.book, unit: last.ref.unit, page: last.ref.page };
+    refHint = 'Copiada de tu última sesión. Cámbiala si hoy trabajas otra parte.';
+  }
+  const form = { minutes: last?.minutes || 30, objectiveId, newObjective: null, ref };
   const errorEl = h('p', { class: 'form-error', role: 'alert' });
 
   const start = () => {
@@ -57,13 +92,13 @@ function renderNew(main, ctx) {
       return;
     }
     const now = nowIso();
-    let objectiveId = form.objectiveId;
+    let chosenId = form.objectiveId;
     let objective = null;
-    if (objectiveId === NEW_OBJECTIVE) {
+    if (chosenId === NEW_OBJECTIVE) {
       objective = newObjective({ title: form.newObjective.title.trim(), skill: form.newObjective.skill }, now);
-      objectiveId = objective.id;
+      chosenId = objective.id;
     }
-    const session = newSession({ minutes: form.minutes, objectiveId, ref: form.ref }, now);
+    const session = newSession({ minutes: form.minutes, objectiveId: chosenId, ref: form.ref }, now);
     ctx.sync.update(`Sesión del ${formatShort(now)}: empezar (${form.minutes} min)`, (d) => {
       if (objective) d.objectives.push(objective);
       d.sessions.push(session);
@@ -78,7 +113,7 @@ function renderNew(main, ctx) {
       groupLabel('¿Cuánto tiempo?', chips(DURATIONS.map((m) => ({ value: m, label: `${m} min` })), form.minutes, (v) => (form.minutes = v), { label: 'Duración' })),
       objectivePicker(data, form.objectiveId, (v, draft) => ((form.objectiveId = v), (form.newObjective = draft)), { id: 'nueva-objetivo', allowNew: true }),
     ),
-    section('Referencia de Édito', refEditor(data, form.ref, (ref) => (form.ref = ref), { idPrefix: 'nueva' })),
+    section('Referencia de Édito', refHint ? h('p', { class: 'hint', text: refHint }) : null, refEditor(data, form.ref, (r) => (form.ref = r), { idPrefix: 'nueva' })),
     errorEl,
     button('Empezar', start, 'primary big block'),
   );
@@ -108,7 +143,7 @@ function renderSession(main, ctx, id) {
     h('p', { class: 'subtitle', text: `${formatShort(s.createdAt)} · ${s.minutes} minutos` }),
   );
 
-  // Cronómetro
+  // Cronómetro y plan sugerido
   let interval = null;
   if (!s.closedAt) {
     const time = h('div', { class: 'timer-time', role: 'timer', 'aria-label': 'Tiempo restante' });
@@ -121,6 +156,10 @@ function renderSession(main, ctx, id) {
       paint();
     }, 'secondary');
     const box = h('div', { class: 'timer' }, h('div', {}, time, state), toggle);
+    const plan = SESSION_PLAN[s.minutes] || SESSION_PLAN[30];
+    const phaseItems = plan.map(([name, min]) => h('li', {}, h('span', { text: name }), h('small', { text: ` ${min} min` })));
+    const phaseText = h('p', { class: 'hint' });
+    const phases = h('div', { class: 'phases' }, h('ol', { 'aria-label': 'Plan sugerido de la sesión' }, phaseItems), phaseText);
     const paint = () => {
       const x = get();
       if (!x) return;
@@ -131,36 +170,32 @@ function renderSession(main, ctx, id) {
       toggle.textContent = running ? 'Pausar' : 'Reanudar';
       box.classList.toggle('done', rem <= 0);
       box.classList.toggle('paused', !running);
+      const phase = currentPhase(x.minutes, elapsedMs(x) / 60000);
+      phaseItems.forEach((li, i) => {
+        li.classList.toggle('done', i < phase.index);
+        li.classList.toggle('current', i === phase.index);
+      });
+      phaseText.textContent = phase.name ? `Plan sugerido · ahora: ${phase.name.toLowerCase()} (hasta el minuto ${phase.endsAt}).` : 'Plan sugerido completado.';
     };
     paint();
     interval = setInterval(paint, 1000);
-    main.append(box);
+    main.append(box, phases);
   }
 
   // Objetivo y referencia
   const summary = h('summary', {}, h('span', { class: 'summary-title', text: 'Objetivo y referencia' }), h('span', { class: 'summary-meta', text: [objectiveTitle(data, s.objectiveId) || 'Sin objetivo', refText(s.ref)].filter(Boolean).join(' · ') }));
+  const criterion = data.objectives.find((o) => o.id === s.objectiveId)?.description.trim();
   main.append(
     h('details', { class: 'card', open: !s.objectiveId && !refText(s.ref) },
       summary,
       objectivePicker(data, s.objectiveId, (v) => edit('objetivo', (x) => (x.objectiveId = v)), { id: 'ses-objetivo' }),
+      criterion ? h('p', { class: 'hint', text: `Cómo sabré que lo logré: ${criterion}` }) : null,
       h('h3', { text: 'Referencia de Édito' }),
       refEditor(data, s.ref, (ref, what) => edit(what, (x) => (x.ref = ref)), { idPrefix: 'ses' }),
     ),
   );
 
-  // Trabajo
-  const area = (field, fieldLabel, hint, what) =>
-    textField({ id: `ses-${field}`, label: fieldLabel, hint, value: s[field], multiline: true, rows: 5, lang: 'fr', onInput: (v) => edit(what, (x) => (x[field] = v)) });
-  main.append(
-    section(
-      'Tu trabajo',
-      area('draft', 'Borrador', 'Ideas, vocabulario, esquema. No tiene que estar bien.', 'borrador'),
-      area('attempt1', 'Primer intento', 'Hazlo sin mirar la solución.', 'primer intento'),
-      area('attempt2', 'Segundo intento', 'Después de revisar: corrige y vuelve a intentarlo.', 'segundo intento'),
-    ),
-  );
-
-  // Tarjetas de esta sesión
+  // Tarjetas de esta sesión (se usan también en la corrección)
   const cardList = h('ul', { class: 'card-list' });
   const paintCards = () => {
     const cards = ctx.sync.data.cards.filter((c) => c.source.type === 'session' && c.source.id === id);
@@ -175,6 +210,59 @@ function renderSession(main, ctx, id) {
     );
   };
   paintCards();
+
+  // Trabajo
+  const area = (field, fieldLabel, hint, what, rows = 5) =>
+    textField({ id: `ses-${field}`, label: fieldLabel, hint, value: s[field], multiline: true, rows, lang: 'fr', onInput: (v) => edit(what, (x) => (x[field] = v)) });
+
+  const fromFeedback = button('', () => openBulkCardsDialog(ctx, { kind: 'error', items: splitCorrections(get().feedback), source: { type: 'session', id }, onDone: paintCards }), 'secondary');
+  const paintFeedbackButton = () => {
+    const n = splitCorrections(get()?.feedback || '').length;
+    fromFeedback.hidden = n === 0;
+    fromFeedback.textContent = `Crear tarjetas con ${n} ${n === 1 ? 'error' : 'errores'}…`;
+  };
+  const feedbackField = textField({
+    id: 'ses-feedback',
+    label: 'Correcciones recibidas',
+    hint: 'Pega aquí la respuesta de ChatGPT (o tus propias notas). Las líneas «lo que escribí → forma correcta» se pueden convertir en tarjetas.',
+    value: s.feedback,
+    multiline: true,
+    rows: 3,
+    autocapitalize: 'none',
+    onInput: (v) => {
+      edit('correcciones', (x) => (x.feedback = v));
+      paintFeedbackButton();
+    },
+  });
+  paintFeedbackButton();
+
+  const copyCorrection = async () => {
+    const x = get();
+    if (!x.attempt1.trim()) {
+      toast('Escribe primero tu primer intento.');
+      return;
+    }
+    const obj = ctx.sync.data.objectives.find((o) => o.id === x.objectiveId);
+    const text = buildPrompt(CORRECTION_TEMPLATE, { ...objectiveValues(obj), referencia: refText(x.ref) || '(sin referencia)', texto: x.attempt1.trim() });
+    toast((await copyText(text)) ? 'Consigna de corrección copiada' : 'No se pudo copiar.');
+  };
+
+  main.append(
+    section(
+      'Tu trabajo',
+      area('draft', 'Borrador', 'Ideas, vocabulario, esquema. No tiene que estar bien.', 'borrador'),
+      area('attempt1', 'Primer intento', 'Hazlo sin mirar la solución.', 'primer intento'),
+      h('div', { class: 'subcard' },
+        h('h3', { text: 'Corrección (opcional)' }),
+        h('p', { class: 'hint', text: 'Copia una consigna con tu primer intento y pégala en ChatGPT: te señala los errores sin darte el texto hecho.' }),
+        h('div', { class: 'row-actions' }, button('Copiar consigna de corrección', copyCorrection, 'secondary'), externalLink('Abrir ChatGPT', CHATGPT_URL, 'btn secondary')),
+        feedbackField,
+        fromFeedback,
+      ),
+      area('attempt2', 'Segundo intento', 'Después de revisar: corrige y vuelve a intentarlo.', 'segundo intento'),
+    ),
+  );
+
   main.append(
     section(
       'Para repasar',
@@ -194,6 +282,23 @@ function renderSession(main, ctx, id) {
     closingField('difficulty', 'Dificultad', 'Qué te costó'),
     closingField('nextStep', 'Siguiente paso', 'Qué harás la próxima vez'),
   );
+  const objective = data.objectives.find((o) => o.id === s.objectiveId);
+  if (objective) {
+    closing.append(
+      h('div', { class: 'note' },
+        h('p', { class: 'note-title', text: `${objective.title} · ${statusLabel(objective.status)}` }),
+        h('p', { class: 'hint', text: '¿Esta sesión muestra un avance? Cambia el estado con el logro como motivo.' }),
+        button('Cambiar estado del objetivo…', () => {
+          const achievement = get().closing.achievement.trim();
+          openStatusDialog(ctx, objective.id, {
+            reason: `${label}.${achievement ? ` Logro: ${clip(achievement, 280)}` : ''}`,
+            source: { type: 'session', id },
+            onDone: () => ctx.rerender(),
+          });
+        }, 'secondary small'),
+      ),
+    );
+  }
   if (!s.closedAt) {
     closing.append(
       h('div', { class: 'row-actions' },
@@ -225,6 +330,7 @@ function renderSession(main, ctx, id) {
   main.append(
     h('div', { class: 'row-actions spaced' },
       button('Preparar conversación con este objetivo', () => ctx.go(`#/conversacion/${createConversation(ctx, { objectiveId: s.objectiveId, ref: s.ref, sessionId: id })}`), 'secondary'),
+      button('Copiar como texto', async () => toast((await copyText(sessionAsText(get(), ctx.sync.data))) ? 'Sesión copiada como texto' : 'No se pudo copiar.'), 'secondary'),
       linkButton('Todas las sesiones', '#/sesiones', 'secondary'),
       button('Eliminar sesión', async () => {
         if (await confirmDialog('Se eliminará esta sesión con todo lo que escribiste. (Seguirá en el historial de GitHub.)', { title: '¿Eliminar la sesión?', confirmLabel: 'Eliminar', danger: true })) {
@@ -238,4 +344,3 @@ function renderSession(main, ctx, id) {
 
   return () => clearInterval(interval);
 }
-

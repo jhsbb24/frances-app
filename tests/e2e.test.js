@@ -502,8 +502,180 @@ describe('Ajustes: token, exportar e importar', () => {
   });
 });
 
+describe('Ayudas para estudiar', () => {
+  test('sesión: plan por fases, corrección con ChatGPT, tarjetas de los errores y estado desde el cierre', async () => {
+    const { data, ids } = sampleData();
+    const fake = createFakeGitHub();
+    fake.setRemote(serialize(data));
+    const dev = await openDevice(fake, 'iphone');
+    const { page, context } = dev;
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await page.goto(`${server.url}/#/sesion/${ids.s1}`);
+    await waitStatus(page, /^Guardado en GitHub/);
+    assert.equal(await page.locator('.phases li.current').count(), 1);
+    assert.match(await page.locator('.phases').innerText(), /Plan sugerido · ahora: primer intento \(hasta el minuto 15\)/);
+
+    await page.getByRole('button', { name: 'Copiar consigna de corrección' }).click();
+    const prompt = await page.evaluate(() => navigator.clipboard.readText());
+    assert.match(prompt, /Pedir y reservar en un restaurante/);
+    assert.match(prompt, /Bonjour, je voudrais réserver une table pour deux personnes/);
+    assert.match(prompt, /Cómo sabré que lo logré: Reservo una mesa y pido sin leer\./);
+
+    assert.equal(await page.getByRole('button', { name: /^Crear tarjetas con/ }).isVisible(), false);
+    await page.fill('#ses-feedback', '3. Errores:\n- nous avons allé au cinéma → nous sommes allés au cinéma (verbo être)\n- bien que je suis fatigué → bien que je sois fatigué');
+    await page.getByRole('button', { name: 'Crear tarjetas con 2 errores…' }).click();
+    await page.getByRole('button', { name: 'Crear tarjetas', exact: true }).click();
+    await waitFor(() => fake.json().cards.filter((c) => c.kind === 'error' && c.source.id === ids.s1).length === 4);
+    const card = fake.json().cards.find((c) => c.note === 'verbo être');
+    assert.equal(card.prompt, 'nous avons allé au cinéma');
+    assert.equal(card.answer, 'nous sommes allés au cinéma');
+    assert.ok(fake.json().cards.some((c) => c.answer === 'bien que je sois fatigué'));
+    assert.equal(fake.json().sessions.find((s) => s.id === ids.s1).feedback.split('\n').length, 3);
+
+    await page.fill('#ses-cierre-achievement', 'Reservé sin pistas.');
+    await page.getByRole('button', { name: 'Cambiar estado del objetivo…' }).click();
+    assert.match(await page.inputValue('#motivo-estado'), /^Sesión del .*Logro: Reservé sin pistas\./);
+    assert.match(await page.locator('dialog').innerText(), /Lo consigo sin ayuda en la situación practicada/);
+    await page.locator('input[value="autonomo"]').check();
+    await page.getByRole('button', { name: 'Guardar cambio' }).click();
+    await waitFor(() => fake.json().objectives.find((o) => o.id === ids.o1).status === 'autonomo');
+    assert.equal(fake.json().objectives.find((o) => o.id === ids.o1).history.at(-1).source.type, 'session');
+    await shot(page, 'iphone-sesion-correccion');
+    assert.deepEqual(dev.errors, []);
+    await context.close();
+  });
+
+  test('conversación: pasar el REGISTRO al cierre de la sesión y repetir la práctica', async () => {
+    const { data, ids } = sampleData();
+    const fake = createFakeGitHub();
+    fake.setRemote(serialize(data));
+    const dev = await openDevice(fake, 'ipad');
+    const { page } = dev;
+    await page.goto(`${server.url}/#/conversacion/${ids.c1}`);
+    await waitStatus(page, /^Guardado en GitHub/);
+    const registro = 'REGISTRO\nLogro: Pedí la cuenta sin ayuda.\nPrioridad: el artículo contracto «au».\nEstado sugerido: Logrado con apoyo\nSiguiente práctica: quejarme de un plato frío.';
+    await page.fill('#conv-registro', registro);
+    await page.getByRole('button', { name: 'Pasar al cierre de la sesión…' }).click();
+    await page.getByRole('button', { name: 'Pasar al cierre', exact: true }).click();
+    await waitFor(() => fake.json().sessions.find((s) => s.id === ids.s1).closing.nextStep === 'quejarme de un plato frío.');
+    const closing = fake.json().sessions.find((s) => s.id === ids.s1).closing;
+    assert.equal(closing.achievement, 'Pedí la cuenta sin ayuda.');
+    assert.equal(closing.difficulty, 'el artículo contracto «au».');
+    assert.equal(fake.json().objectives.find((o) => o.id === ids.o1).status, 'practica', 'el estado no cambia sin confirmar');
+
+    const before = fake.json().conversations.length;
+    await page.getByRole('button', { name: 'Repetir esta práctica' }).click();
+    await page.waitForFunction((id) => location.hash.startsWith('#/conversacion/') && !location.hash.endsWith(id), ids.c1);
+    assert.match(await page.inputValue('#conv-errores'), /el artículo contracto «au»/);
+    assert.equal(await page.inputValue('#conv-rol'), 'un serveur dans un bistrot parisien');
+    await waitFor(() => fake.json().conversations.length === before + 1);
+    assert.deepEqual(dev.errors, []);
+    await dev.context.close();
+  });
+
+  test('Hoy: primeros pasos (y ocultarlos), siguiente paso, sugerencia y número de repasos', async () => {
+    const fresh = await openDevice(null, 'iphone', { token: '' });
+    await fresh.page.goto(`${server.url}/#/hoy`);
+    await fresh.page.getByRole('heading', { name: 'Primeros pasos (0 de 6)' }).waitFor();
+    await shot(fresh.page, 'iphone-primeros-pasos');
+    await fresh.page.getByRole('button', { name: 'Ocultar esta lista' }).click();
+    await fresh.page.reload();
+    await fresh.page.getByRole('heading', { name: 'Hoy', exact: true }).waitFor();
+    assert.equal(await fresh.page.getByText(/^Primeros pasos/).count(), 0);
+    await fresh.context.close();
+
+    const { data } = sampleData();
+    const fake = createFakeGitHub();
+    fake.setRemote(serialize(data));
+    const dev = await openDevice(fake, 'iphone', { fixedTime: '2026-10-28T19:00:00Z' });
+    const { page } = dev;
+    await page.goto(`${server.url}/#/hoy`);
+    await waitStatus(page, /^Guardado en GitHub/);
+    const text = await page.locator('main').innerText();
+    assert.match(text, /Tu siguiente paso \(sesión del 26 oct\.?\)/);
+    assert.match(text, /Sugerencia de objetivo/);
+    assert.equal(await page.locator('#repasos-pendientes').textContent(), '4');
+    await shot(page, 'iphone-hoy-sugerencia');
+    assert.deepEqual(dev.errors, []);
+    await dev.context.close();
+  });
+
+  test('Repaso: escribir la respuesta (acentos) y atajos de teclado en el Mac', async () => {
+    const { data } = sampleData();
+    const answers = Object.fromEntries(data.cards.map((c) => [c.prompt, c.answer]));
+    const fake = createFakeGitHub();
+    fake.setRemote(serialize(data));
+    const dev = await openDevice(fake, 'mac', { fixedTime: '2026-10-28T19:00:00Z' });
+    const { page } = dev;
+    await page.goto(`${server.url}/#/repaso/practicar`);
+    await waitStatus(page, /^Guardado en GitHub/);
+    const promptNow = async () => page.locator('.flash-text').first().textContent();
+
+    // 1) Escribe sin acentos → aviso de acentos; atajo ⌘+Intro y «1».
+    let prompt = await promptNow();
+    await page.fill('#repaso-escribir', answers[prompt].normalize('NFD').replace(/[̀-ͯ]/g, ''));
+    await page.keyboard.press('Meta+Enter');
+    const accents = /[̀-ͯ]/.test(answers[prompt].normalize('NFD'));
+    assert.equal(await page.locator('.compare').textContent(), accents ? 'Casi: revisa los acentos.' : '✓ Lo escribiste igual.');
+    await page.keyboard.press('1');
+    await page.getByText('Quedan 3').waitFor();
+
+    // 2) Escribe igual → «Lo escribiste igual»; «3».
+    prompt = await promptNow();
+    await page.fill('#repaso-escribir', answers[prompt]);
+    await page.keyboard.press('Control+Enter');
+    assert.equal(await page.locator('.compare').textContent(), '✓ Lo escribiste igual.');
+    await shot(page, 'mac-repaso-escrito');
+    await page.keyboard.press('3');
+    await page.getByText('Quedan 2').waitFor();
+
+    // 3) Sin escribir: Espacio para ver y «2».
+    await page.locator('h1').click();
+    await page.keyboard.press(' ');
+    assert.ok(await page.locator('.flash-answer').isVisible());
+    await page.keyboard.press('2');
+    await waitFor(() => fake.json().cards.filter((c) => c.reviews.length).length === 3);
+    const results = fake.json().cards.flatMap((c) => c.reviews.map((r) => r.result)).sort();
+    assert.deepEqual(results, ['con', 'no', 'sin']);
+    assert.deepEqual(dev.errors, []);
+    await dev.context.close();
+  });
+
+  test('Biblioteca y Objetivos: empezar una sesión ya rellenada; Progreso con unidades y actividad', async () => {
+    const { data, ids } = sampleData();
+    const fake = createFakeGitHub();
+    fake.setRemote(serialize(data));
+    const dev = await openDevice(fake, 'ipadHorizontal', { fixedTime: '2026-10-28T19:00:00Z' });
+    const { page } = dev;
+    await page.goto(`${server.url}/#/biblioteca`);
+    await waitStatus(page, /^Guardado en GitHub/);
+    assert.match(await page.locator('main').innerText(), /Usada en 1 sesión y 1 conversación/);
+    await page.locator('.ref-card', { hasText: 'Unidad 3' }).getByRole('link', { name: 'Empezar sesión' }).click();
+    await page.waitForSelector('#nueva-unidad');
+    assert.equal(await page.inputValue('#nueva-unidad'), '3');
+    assert.equal(await page.inputValue('#nueva-pagina'), '42');
+
+    await go(page, `#/objetivos/${ids.o1}`);
+    await page.getByRole('link', { name: 'Empezar sesión' }).click();
+    await page.waitForSelector('#nueva-objetivo');
+    assert.equal(await page.inputValue('#nueva-objetivo'), ids.o1);
+
+    await go(page, '#/objetivos');
+    assert.match(await page.locator('main').innerText(), /Última práctica: (hoy|ayer|hace \d+ días)/);
+
+    await go(page, '#/progreso');
+    const progress = await page.locator('main').innerText();
+    assert.match(progress, /Unidad 3 · 1 sesión, 1 conversación/);
+    assert.match(progress, /Esta semana: 2 sesiones · 1 conversación · 0 repasos/);
+    assert.match(progress, /Dificultad \(sesión\): Las fórmulas de cortesía del final\./);
+    await shot(page, 'ipadHorizontal-progreso-nuevo');
+    assert.deepEqual(dev.errors, []);
+    await dev.context.close();
+  });
+});
+
 describe('Pantallas de iPhone, iPad y Mac', () => {
-  const ROUTES = (ids) => ['#/hoy', '#/sesion/nueva', `#/sesion/${ids.s1}`, '#/sesiones', '#/conversacion', `#/conversacion/${ids.c1}`, '#/biblioteca', '#/objetivos', `#/objetivos/${ids.o1}`, '#/repaso', '#/repaso/practicar', '#/repaso/tarjetas', '#/progreso', '#/ajustes', '#/mas'];
+  const ROUTES = (ids) => ['#/hoy', '#/sesion/nueva', `#/sesion/${ids.s1}`, '#/sesiones', '#/conversacion', `#/conversacion/${ids.c1}`, '#/biblioteca', '#/objetivos', `#/objetivos/${ids.o1}`, '#/repaso', '#/repaso/practicar', '#/repaso/tarjetas', '#/progreso', '#/ajustes', '#/ayuda', '#/mas'];
 
   for (const kind of Object.keys(DEVICES)) {
     test(`${kind}: sin desbordes, indicador y navegación siempre visibles, botones grandes`, async () => {

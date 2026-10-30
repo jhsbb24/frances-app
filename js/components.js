@@ -166,14 +166,13 @@ export function openStatusDialog(ctx, objectiveId, { suggested = '', reason = ''
     const current = st.id === obj.status;
     const input = h('input', { type: 'radio', name: 'nuevo-estado', value: st.id, disabled: current, checked: st.id === to });
     input.addEventListener('change', () => (to = st.id));
+    const tag = current ? ' (estado actual)' : st.id === suggested ? ' (sugerido)' : '';
     list.append(
       h(
         'label',
         { class: `radio${current ? ' current' : ''}` },
         input,
-        h('span', { text: st.label }),
-        current ? h('small', { text: ' (estado actual)' }) : null,
-        st.id === suggested && !current ? h('small', { text: ' (sugerido)' }) : null,
+        h('span', { class: 'radio-text' }, h('span', { class: 'radio-title', text: `${st.label}${tag}` }), h('small', { class: 'radio-help', text: st.help })),
       ),
     );
   }
@@ -341,6 +340,55 @@ export function openCardDialog(ctx, { cardId = '', onDone } = {}) {
             toast('Tarjeta creada · primer repaso mañana');
           }
           onDone?.();
+          return true;
+        },
+      },
+    ],
+  });
+}
+
+/**
+ * Ventana para crear varias tarjetas de una vez (expresiones del
+ * REGISTRO o errores de una corrección). Puedes corregirlas antes.
+ * items: [{ prompt, answer, note }]
+ */
+export function openBulkCardsDialog(ctx, { kind, items, source, onDone }) {
+  const labels = CARD_KINDS[kind];
+  const existing = new Set(ctx.sync.data.cards.filter((k) => k.source.id === source.id).map((k) => k.answer.trim().toLowerCase()));
+  const rows = items.map((item, i) => {
+    const already = existing.has(item.answer.trim().toLowerCase());
+    const row = { use: !already, answer: item.answer, prompt: item.prompt || '', note: item.note || '' };
+    const check = h('input', { type: 'checkbox', checked: row.use, id: `lote-usar-${i}` });
+    check.addEventListener('change', () => (row.use = check.checked));
+    row.el = h('div', { class: 'subcard' },
+      h('label', { class: 'check', for: `lote-usar-${i}` }, check, h('span', { text: already ? ' Crear (ya existe una tarjeta igual)' : ' Crear esta tarjeta' })),
+      textField({ id: `lote-pista-${i}`, label: labels.prompt, value: row.prompt, compact: true, lang: kind === 'error' ? 'fr' : undefined, onInput: (v) => (row.prompt = v) }),
+      textField({ id: `lote-respuesta-${i}`, label: labels.answer, value: row.answer, lang: 'fr', compact: true, onInput: (v) => (row.answer = v) }),
+      row.note ? h('p', { class: 'hint', text: `Nota: ${row.note}` }) : null,
+    );
+    return row;
+  });
+  const errorEl = h('p', { class: 'form-error', role: 'alert' });
+  openDialog({
+    title: 'Crear tarjetas de repaso',
+    content: [h('p', { class: 'hint', text: 'Revisa y corrige antes de crear. El primer repaso será mañana.' }), ...rows.map((r) => r.el), errorEl],
+    actions: [
+      { label: 'Cancelar', class: 'secondary' },
+      {
+        label: 'Crear tarjetas',
+        class: 'primary',
+        onClick: () => {
+          const chosen = rows.filter((r) => r.use && r.answer.trim());
+          if (!chosen.length) {
+            errorEl.textContent = 'No elegiste ninguna tarjeta.';
+            return false;
+          }
+          const t = today();
+          const cards = chosen.map((r) => newCard({ kind, prompt: r.prompt.trim(), answer: r.answer.trim(), note: r.note.trim(), source }, t));
+          const from = source.type === 'conversation' ? 'una conversación' : 'una sesión';
+          ctx.sync.update(`Repaso: ${cards.length} ${cards.length === 1 ? 'tarjeta' : 'tarjetas'} desde ${from}`, (d) => d.cards.push(...cards));
+          toast(`${cards.length} ${cards.length === 1 ? 'tarjeta creada' : 'tarjetas creadas'} · primer repaso mañana`);
+          onDone?.(cards.length);
           return true;
         },
       },

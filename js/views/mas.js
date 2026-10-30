@@ -7,6 +7,7 @@ const LINKS = [
   { href: '#/objetivos', icon: 'objetivo', label: 'Objetivos', text: 'Habilidades, estados e historial' },
   { href: '#/progreso', icon: 'progreso', label: 'Progreso', text: 'Objetivos por estado y evidencias' },
   { href: '#/ajustes', icon: 'ajustes', label: 'Ajustes', text: 'Token de GitHub, exportar e importar' },
+  { href: '#/ayuda', icon: 'ayuda', label: 'Ayuda', text: 'Cómo sacar partido a la app' },
 ];
 
 export function render(main) {

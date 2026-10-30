@@ -2,14 +2,12 @@
 // con una plantilla, cópiala, abre ChatGPT y, al volver, pega el
 // REGISTRO. El registro se guarda íntegro y NO cambia estados ni
 // fechas por sí solo: la app te propone acciones y tú confirmas.
-import { DIFFICULTIES, ROLE_SUGGESTIONS, skillLabel, statusLabel, difficultyOf } from '../config.js';
-import { h, chips, groupLabel, textField, section, empty, button, toast, confirmDialog, copyText, externalLink, fitTextarea, openDialog } from '../dom.js';
-import { today, dayKey, formatDay, formatShort, formatDateTime } from '../dates.js';
-import { newConversation, newCard, objectiveTitle, refText, nowIso } from '../model.js';
-import { buildPrompt, parseRegistro, DEFAULT_TEMPLATE, REGISTRO_FIELDS } from '../registro.js';
-import { refEditor, objectivePicker, openStatusDialog, byCreatedDesc, byUpdatedDesc, short, notFound } from '../components.js';
-
-const CHATGPT_URL = 'https://chatgpt.com/';
+import { DIFFICULTIES, ROLE_SUGGESTIONS, CHATGPT_URL, statusLabel, difficultyOf } from '../config.js';
+import { h, chips, groupLabel, textField, section, empty, button, toast, confirmDialog, copyText, externalLink, fitTextarea } from '../dom.js';
+import { dayKey, formatDay, formatShort, formatDateTime } from '../dates.js';
+import { newConversation, objectiveTitle, refText, nowIso } from '../model.js';
+import { buildPrompt, parseRegistro, DEFAULT_TEMPLATE, REGISTRO_FIELDS, objectiveValues, statusDefinitions, plain } from '../registro.js';
+import { refEditor, objectivePicker, openStatusDialog, openBulkCardsDialog, byCreatedDesc, byUpdatedDesc, short, notFound } from '../components.js';
 
 export const templateOf = (data) => data.settings.promptTemplate.trim() || DEFAULT_TEMPLATE;
 
@@ -17,9 +15,9 @@ export const templateOf = (data) => data.settings.promptTemplate.trim() || DEFAU
 export function promptValues(conv, data) {
   const obj = data.objectives.find((o) => o.id === conv.objectiveId);
   return {
+    ...objectiveValues(obj),
     fecha: formatDay(dayKey(new Date(conv.createdAt)), { year: true }),
-    objetivo: obj?.title || '(sin especificar)',
-    habilidad: obj ? skillLabel(obj.skill) : 'interacción oral',
+    estados: statusDefinitions(),
     rol: conv.role.trim() || 'un(e) francophone amable que conversa conmigo',
     dificultad: difficultyOf(conv.difficulty).text,
     referencia: refText(conv.ref) || '(sin referencia)',
@@ -32,8 +30,9 @@ export function promptValues(conv, data) {
 /**
  * Crea una conversación nueva y devuelve su id. Si no se indica
  * objetivo, usa el de la sesión abierta más reciente.
+ * `extra` puede traer rol, dificultad, expresiones y errores.
  */
-export function createConversation(ctx, defaults = {}) {
+export function createConversation(ctx, defaults = {}, extra = {}) {
   const data = ctx.sync.data;
   let init = defaults;
   if (!defaults.objectiveId) {
@@ -41,6 +40,7 @@ export function createConversation(ctx, defaults = {}) {
     if (open) init = { objectiveId: open.objectiveId, ref: open.ref, sessionId: open.id };
   }
   const conv = newConversation(init);
+  for (const key of ['role', 'difficulty', 'expr1', 'expr2', 'errors']) if (typeof extra[key] === 'string') conv[key] = extra[key];
   conv.prompt = buildPrompt(templateOf(data), promptValues(conv, data));
   ctx.sync.update(`Conversación del ${formatShort(conv.createdAt)}: nueva consigna`, (d) => d.conversations.push(conv));
   return conv.id;
@@ -57,26 +57,52 @@ export function render(main, ctx, params) {
 
 // ── Lista ─────────────────────────────────────────────────────
 
+const listFilter = { text: '' };
+
 function renderList(main, ctx) {
   const data = ctx.sync.data;
+  const results = h('div', {});
+  const item = (c) => {
+    const logro = c.registro.trim() ? parseRegistro(c.registro).fields.logro : '';
+    return h('a', { class: 'item link-item', href: `#/conversacion/${c.id}` },
+      h('div', { class: 'item-main' },
+        h('p', { class: 'item-title', text: objectiveTitle(data, c.objectiveId) || 'Conversación sin objetivo' }),
+        h('p', { class: 'item-meta', text: [formatShort(c.createdAt), c.role && short(c.role, 50), refText(c.ref)].filter(Boolean).join(' · ') }),
+        logro ? h('p', { class: 'item-text', text: `Logro: ${short(logro, 120)}` }) : null,
+      ),
+    );
+  };
+  const paint = () => {
+    const words = plain(listFilter.text).split(/\s+/).filter(Boolean);
+    const text = (c) => plain([objectiveTitle(data, c.objectiveId), c.role, refText(c.ref), c.expr1, c.expr2, c.errors, c.registro].join(' '));
+    const all = data.conversations.filter((c) => words.every((w) => text(c).includes(w))).sort(byCreatedDesc);
+    const waiting = all.filter((c) => !c.registro.trim());
+    const done = all.filter((c) => c.registro.trim());
+    results.replaceChildren();
+    if (waiting.length) results.append(section('Esperando el REGISTRO', ...waiting.map(item)));
+    const none = words.length ? 'Ninguna conversación contiene ese texto.' : 'Todavía no has guardado ningún registro.';
+    results.append(section('Con registro', done.length ? done.slice(0, 80).map(item) : empty(none)));
+  };
+  const search = h('input', { type: 'search', id: 'conversaciones-buscar', placeholder: 'Buscar en consignas y registros…', autocomplete: 'off', 'aria-label': 'Buscar en tus conversaciones' });
+  search.value = listFilter.text;
+  search.addEventListener('input', () => ((listFilter.text = search.value), paint()));
   main.append(
     h('h1', { text: 'Conversación' }),
     h('p', { class: 'subtitle', text: 'Prepara una consigna, practica con ChatGPT Voice y pega aquí el REGISTRO al terminar.' }),
     button('Nueva consigna', () => ctx.go(`#/conversacion/${createConversation(ctx)}`), 'primary big block'),
+    h('div', { class: 'toolbar' }, search),
+    results,
   );
-  const item = (c) =>
-    h('a', { class: 'item link-item', href: `#/conversacion/${c.id}` },
-      h('div', { class: 'item-main' },
-        h('p', { class: 'item-title', text: objectiveTitle(data, c.objectiveId) || 'Conversación sin objetivo' }),
-        h('p', { class: 'item-meta', text: [formatShort(c.createdAt), c.role && short(c.role, 50), refText(c.ref)].filter(Boolean).join(' · ') }),
-      ),
-    );
-  const all = [...data.conversations].sort(byCreatedDesc);
-  const waiting = all.filter((c) => !c.registro.trim());
-  const done = all.filter((c) => c.registro.trim());
-  if (waiting.length) main.append(section('Esperando el REGISTRO', ...waiting.map(item)));
-  main.append(section('Con registro', done.length ? done.slice(0, 60).map(item) : empty('Todavía no has guardado ningún registro.')));
+  paint();
 }
+
+/** Añade texto a un campo sin borrar lo que ya había (y sin repetirlo). */
+export const appendText = (current, addition) => {
+  const a = String(addition || '').trim();
+  const c = String(current || '').trim();
+  if (!a || c.includes(a)) return current;
+  return c ? `${c}\n${a}` : a;
+};
 
 // ── Una conversación ──────────────────────────────────────────
 
@@ -222,6 +248,8 @@ function renderConversation(main, ctx, id) {
     if (!x.registro.trim()) return;
     const d = ctx.sync.data;
     const parsed = parseRegistro(x.registro);
+    // Los botones vuelven a leer el REGISTRO al tocarlos, por si acabas de cambiarlo.
+    const fresh = () => parseRegistro(get()?.registro || '');
     const box = h('div', { class: 'subcard' }, h('h3', { text: 'Lo que encontré en el registro' }));
     if (!parsed.found) {
       box.append(h('p', { text: 'No reconozco el formato del REGISTRO. Se guardó tal cual; puedes cambiar estados y crear tarjetas a mano.' }));
@@ -242,19 +270,21 @@ function renderConversation(main, ctx, id) {
       } else if (obj.status === parsed.status) {
         box.append(h('p', { text: `Estado sugerido: ${statusLabel(parsed.status)}. Coincide con el estado actual de «${obj.title}».` }));
       } else {
-        const evidence = parsed.fields.evidencia ? ` Evidencia: ${short(parsed.fields.evidencia, 280)}` : '';
         box.append(
           h('p', { text: `Estado sugerido: ${statusLabel(parsed.status)} (ahora: ${statusLabel(obj.status)}).` }),
-          button('Revisar y cambiar el estado…', () =>
+          button('Revisar y cambiar el estado…', () => {
+            const now = fresh();
+            const evidence = now.fields.evidencia ? ` Evidencia: ${short(now.fields.evidencia, 280)}` : '';
             openStatusDialog(ctx, obj.id, {
-              suggested: parsed.status,
+              suggested: now.status || '',
               reason: `Registro de la conversación del ${formatShort(x.createdAt)}.${evidence}`,
               source: { type: 'conversation', id },
               onDone: ({ from, to }) => {
                 edit('acción confirmada', (y) => y.actions.push({ at: nowIso(), text: `Estado de «${obj.title}»: ${statusLabel(from)} → ${statusLabel(to)}` }));
                 paintAnalysis();
               },
-            }), 'secondary'),
+            });
+          }, 'secondary'),
         );
       }
     }
@@ -263,13 +293,60 @@ function renderConversation(main, ctx, id) {
     if (parsed.expressions.length) {
       box.append(
         h('p', { text: `Expresiones para recuperar: ${parsed.expressions.length}.` }),
-        button('Crear tarjetas de repaso…', () => openExpressionsDialog(ctx, id, parsed.expressions, (n) => {
-          edit('acción confirmada', (y) => y.actions.push({ at: nowIso(), text: `${n} ${n === 1 ? 'tarjeta creada' : 'tarjetas creadas'}` }));
-          paintAnalysis();
+        button('Crear tarjetas de repaso…', () => openBulkCardsDialog(ctx, {
+          kind: 'expresion',
+          items: fresh().expressions,
+          source: { type: 'conversation', id },
+          onDone: (n) => {
+            edit('acción confirmada', (y) => y.actions.push({ at: nowIso(), text: `${n} ${n === 1 ? 'tarjeta creada' : 'tarjetas creadas'}` }));
+            paintAnalysis();
+          },
         }), 'secondary'),
       );
     }
-    box.append(h('p', { class: 'hint', text: 'Nada cambia hasta que tú lo confirmes.' }));
+    // Pasar al cierre de la sesión de la que salió esta conversación
+    const session = d.sessions.find((y) => y.id === x.sessionId);
+    const closingFrom = (p) =>
+      [
+        ['achievement', 'Logro', p.fields.logro],
+        ['difficulty', 'Dificultad', p.fields.prioridad],
+        ['nextStep', 'Siguiente paso', p.fields.siguiente],
+      ].filter(([, , value]) => value);
+    const closingMap = closingFrom(parsed);
+    if (session && closingMap.length) {
+      box.append(
+        h('p', { text: `Puedes pasar ${closingMap.map(([, name]) => name.toLowerCase()).join(', ')} al cierre de la sesión del ${formatShort(session.createdAt)}.` }),
+        button('Pasar al cierre de la sesión…', async () => {
+          const items = closingFrom(fresh());
+          if (!items.length) return;
+          const ok = await confirmDialog(`Se añadirá al cierre de la sesión del ${formatShort(session.createdAt)}: ${items.map(([, name, value]) => `${name}: «${short(value, 80)}»`).join(' · ')}. Lo que ya tenía el cierre no se borra.`, { title: '¿Pasar al cierre de la sesión?', confirmLabel: 'Pasar al cierre' });
+          if (!ok) return;
+          ctx.sync.update(`Sesión del ${formatShort(session.createdAt)}: cierre desde el REGISTRO`, (dd) => {
+            const target = dd.sessions.find((y) => y.id === session.id);
+            if (!target) return;
+            for (const [field, , value] of items) target.closing[field] = appendText(target.closing[field], value);
+            target.updatedAt = nowIso();
+          });
+          edit('acción confirmada', (y) => y.actions.push({ at: nowIso(), text: 'Registro pasado al cierre de la sesión' }));
+          toast('Pasado al cierre de la sesión');
+          paintAnalysis();
+        }, 'secondary'),
+      );
+    }
+
+    box.append(
+      h('p', { class: 'hint', text: 'Nada cambia hasta que tú lo confirmes.' }),
+      button('Repetir esta práctica', () => {
+        const priority = fresh().fields.prioridad || '';
+        const newId = createConversation(
+          ctx,
+          { objectiveId: x.objectiveId, ref: x.ref, sessionId: x.sessionId },
+          { role: x.role, difficulty: x.difficulty, expr1: x.expr1, expr2: x.expr2, errors: appendText(x.errors, priority) },
+        );
+        toast('Consigna nueva con la prioridad del registro');
+        ctx.go(`#/conversacion/${newId}`);
+      }, 'secondary'),
+    );
 
     const actions = get().actions;
     if (actions.length) {
@@ -293,46 +370,4 @@ function renderConversation(main, ctx, id) {
     ),
   );
   return () => clearTimeout(analysisTimer);
-}
-
-/** Ventana para elegir qué expresiones del registro pasan a ser tarjetas. */
-function openExpressionsDialog(ctx, convId, expressions, onDone) {
-  const existing = new Set(ctx.sync.data.cards.filter((k) => k.source.id === convId).map((k) => k.answer.trim().toLowerCase()));
-  const rows = expressions.map((e, i) => {
-    const already = existing.has(e.answer.trim().toLowerCase());
-    const row = { use: !already, answer: e.answer, prompt: e.prompt };
-    const check = h('input', { type: 'checkbox', checked: row.use, id: `expr-usar-${i}` });
-    check.addEventListener('change', () => (row.use = check.checked));
-    row.el = h('div', { class: 'subcard' },
-      h('label', { class: 'check', for: `expr-usar-${i}` }, check, h('span', { text: already ? ' Crear (ya existe una tarjeta igual)' : ' Crear esta tarjeta' })),
-      textField({ id: `expr-respuesta-${i}`, label: 'Expresión en francés', value: e.answer, lang: 'fr', compact: true, onInput: (v) => (row.answer = v) }),
-      textField({ id: `expr-pista-${i}`, label: 'Pista (significado o situación)', value: e.prompt, compact: true, onInput: (v) => (row.prompt = v) }),
-    );
-    return row;
-  });
-  const errorEl = h('p', { class: 'form-error', role: 'alert' });
-  openDialog({
-    title: 'Crear tarjetas de repaso',
-    content: [h('p', { class: 'hint', text: 'Revisa y corrige antes de crear. El primer repaso será mañana.' }), ...rows.map((r) => r.el), errorEl],
-    actions: [
-      { label: 'Cancelar', class: 'secondary' },
-      {
-        label: 'Crear tarjetas',
-        class: 'primary',
-        onClick: () => {
-          const chosen = rows.filter((r) => r.use && r.answer.trim());
-          if (!chosen.length) {
-            errorEl.textContent = 'No elegiste ninguna expresión.';
-            return false;
-          }
-          const t = today();
-          const cards = chosen.map((r) => newCard({ kind: 'expresion', prompt: r.prompt.trim(), answer: r.answer.trim(), source: { type: 'conversation', id: convId } }, t));
-          ctx.sync.update(`Repaso: ${cards.length} tarjetas desde una conversación`, (d) => d.cards.push(...cards));
-          toast(`${cards.length} ${cards.length === 1 ? 'tarjeta creada' : 'tarjetas creadas'}`);
-          onDone(cards.length);
-          return true;
-        },
-      },
-    ],
-  });
 }

@@ -9,6 +9,7 @@
 // ─────────────────────────────────────────────────────────────
 import { REVIEW_INTERVALS } from './config.js';
 import { addDays } from './dates.js';
+import { plain } from './registro.js';
 
 const LAST = REVIEW_INTERVALS.length - 1;
 const clampStep = (step) => Math.min(Math.max(Number.isInteger(step) ? step : 0, 0), LAST);
@@ -87,4 +88,15 @@ export function planReschedule(cards, todayKey, perDay, restart = false) {
     plan.set(c.id, { due: day, step: restart ? 0 : clampStep(c.step) });
   }
   return plan;
+}
+
+/** Compara lo que escribiste con la respuesta (los acentos cuentan). */
+export function compareAnswer(typed, answer) {
+  const tidy = (t) => String(t || '').normalize('NFC').toLowerCase().replace(/[’`´]/g, "'").replace(/[.!?¡¿,;:«»"]/g, ' ').replace(/\s+/g, ' ').trim();
+  const a = tidy(typed);
+  const b = tidy(answer);
+  if (!a) return '';
+  if (a === b) return 'igual';
+  if (plain(a) === plain(b)) return 'acentos';
+  return 'distinta';
 }

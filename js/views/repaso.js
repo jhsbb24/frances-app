@@ -3,9 +3,9 @@
 // Tras una pausa larga, las atrasadas se pueden reprogramar
 // (repartir en varios días) en vez de acumularse.
 import { REVIEW_INTERVALS } from '../config.js';
-import { h, chips, section, empty, button, linkButton, toast, select, labeled } from '../dom.js';
+import { h, chips, section, empty, button, linkButton, toast, select, labeled, textField } from '../dom.js';
 import { today, formatDay, relativeDay, addDays, diffDays } from '../dates.js';
-import { dueCards, overdueCards, applyAnswer, planReschedule, schedule, RESULTS, intervalDays } from '../review.js';
+import { dueCards, overdueCards, applyAnswer, planReschedule, schedule, compareAnswer, RESULTS, intervalDays } from '../review.js';
 import { nowIso } from '../model.js';
 import { plain } from '../registro.js';
 import { CARD_KINDS, openCardDialog } from '../components.js';
@@ -94,7 +94,14 @@ function renderPractice(main, ctx) {
   const queue = dueCards(ctx.sync.data.cards, today()).map((c) => c.id);
   const counts = { sin: 0, con: 0, no: 0 };
   const stage = h('div', {});
-  main.append(h('a', { class: 'back', href: '#/repaso', text: '‹ Repaso' }), h('h1', { text: 'Repasar' }), stage);
+  const hasKeyboard = window.matchMedia?.('(hover: hover) and (pointer: fine)').matches;
+  main.append(
+    h('a', { class: 'back', href: '#/repaso', text: '‹ Repaso' }),
+    h('h1', { text: 'Repasar' }),
+    stage,
+    hasKeyboard ? h('p', { class: 'hint', text: 'Atajos: Espacio o Intro para ver la respuesta (⌘+Intro si estás escribiendo); 1, 2 y 3 para responder.' }) : null,
+  );
+  let current = null; // { reveal(), answer(result), revealed }
 
   const showNext = () => {
     stage.replaceChildren();
@@ -106,6 +113,7 @@ function renderPractice(main, ctx) {
       if (c && !c.archived && c.due <= t) card = c;
     }
     if (!card) {
+      current = null;
       const total = counts.sin + counts.con + counts.no;
       stage.append(
         section(
@@ -117,12 +125,15 @@ function renderPractice(main, ctx) {
       return;
     }
     const kind = CARD_KINDS[card.kind];
+    const typed = textField({ id: 'repaso-escribir', label: 'Tu respuesta (opcional)', hint: 'Escribirla ayuda a recordarla y a fijarte en la ortografía.', value: '', multiline: true, rows: 1, lang: 'fr', autocapitalize: 'none' });
+    const comparison = h('p', { class: 'compare', 'aria-live': 'polite' });
     const answerBox = h('div', { class: 'flash-answer', hidden: true },
       h('p', { class: 'flash-label', text: kind.answer }),
       h('p', { class: 'flash-text pre', lang: 'fr', text: card.answer }),
+      comparison,
       card.note ? h('p', { class: 'hint pre', text: card.note }) : null,
     );
-    const answers = h('div', { class: 'answer-buttons', hidden: true },
+    const answers = h('div', { class: 'answer-buttons', hidden: true, tabindex: '-1', role: 'group', 'aria-label': '¿Cómo te salió?' },
       RESULTS.map((r) =>
         h('button', { type: 'button', class: `btn answer-${r.id}`, on: { click: () => answer(card.id, r.id) } },
           h('span', { text: r.label }),
@@ -130,24 +141,52 @@ function renderPractice(main, ctx) {
         ),
       ),
     );
-    const reveal = button('Mostrar respuesta', () => {
+    const showAnswer = () => {
+      if (reveal.hidden) return; // ya se ve
+      const result = compareAnswer(typed.input.value, card.answer);
+      comparison.textContent = { igual: '✓ Lo escribiste igual.', acentos: 'Casi: revisa los acentos.', distinta: `Escribiste: «${typed.input.value.trim()}»` }[result] || '';
+      comparison.className = `compare ${result}`;
+      typed.input.readOnly = true;
       answerBox.hidden = false;
       answers.hidden = false;
       reveal.hidden = true;
-      answers.querySelector('button').focus();
-    }, 'primary big block');
+      // El foco va al grupo (no a «Sin ayuda») para no responder sin querer con Intro.
+      answers.focus({ preventScroll: true });
+    };
+    const reveal = button('Mostrar respuesta', showAnswer, 'primary big block');
+    current = { card, showAnswer, revealed: () => reveal.hidden, typed: typed.input };
     stage.append(
       h('p', { class: 'hint', text: `Quedan ${queue.length + 1}` }),
       h('article', { class: 'card flash' },
         h('span', { class: 'badge', text: kind.label }),
         h('p', { class: 'flash-label', text: kind.prompt }),
         h('p', { class: 'flash-text pre', text: card.prompt || '(sin pista: intenta recordar la respuesta)' }),
+        typed,
         answerBox,
       ),
       reveal,
       answers,
     );
   };
+
+  // Atajos de teclado (Mac o iPad con teclado)
+  const onKey = (e) => {
+    if (!current || e.altKey) return;
+    const inField = e.target === current.typed;
+    if (!current.revealed()) {
+      if ((e.key === 'Enter' && (e.metaKey || e.ctrlKey)) || (!inField && (e.key === ' ' || e.key === 'Enter'))) {
+        e.preventDefault();
+        current.showAnswer();
+      }
+      return;
+    }
+    const result = { 1: 'sin', 2: 'con', 3: 'no' }[e.key];
+    if (result && !e.metaKey && !e.ctrlKey) {
+      e.preventDefault();
+      answer(current.card.id, result);
+    }
+  };
+  document.addEventListener('keydown', onKey);
 
   const answer = (id, result) => {
     const t = today();
@@ -167,6 +206,7 @@ function renderPractice(main, ctx) {
   };
 
   showNext();
+  return () => document.removeEventListener('keydown', onKey);
 }
 
 function preview(card, result, t) {

@@ -12,9 +12,11 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
 const { dayKey, today, addDays } = await import('../js/dates.js');
-const { schedule, applyAnswer, dueCards, overdueCards, planReschedule, firstDue } = await import('../js/review.js');
-const { newCard, newSession, newReference, emptyData, normalizeData, clone } = await import('../js/model.js');
-const { parseRegistro, buildPrompt, DEFAULT_TEMPLATE, REGISTRO_FIELDS, splitExpressions } = await import('../js/registro.js');
+const { schedule, applyAnswer, dueCards, overdueCards, planReschedule, firstDue, compareAnswer } = await import('../js/review.js');
+const { newCard, newSession, newReference, newObjective, newConversation, emptyData, normalizeData, clone, currentPhase, sessionAsText } = await import('../js/model.js');
+const { parseRegistro, buildPrompt, DEFAULT_TEMPLATE, CORRECTION_TEMPLATE, REGISTRO_FIELDS, splitExpressions, splitCorrections, matchStatus, objectiveValues, statusDefinitions } = await import('../js/registro.js');
+const { suggestObjective, latestNextStep, weekStart, weeklyActivity, unitsWorked, referenceUsage, recentDifficulties, lastActivity } = await import('../js/insights.js');
+const { readFileSync, readdirSync } = await import('node:fs');
 const { createGitHubApi, encodeBase64, decodeBase64, maskToken, parseRepo } = await import('../js/github.js');
 const { SyncEngine, buildCommitMessage } = await import('../js/sync.js');
 const { compareVersions, mergeVersions } = await import('../js/diff.js');
@@ -141,9 +143,16 @@ describe('Programación de repasos (1, 3, 7, 14 días)', () => {
 
 describe('Consigna y REGISTRO', () => {
   test('la plantilla incluye el REGISTRO con todos los campos, en orden', () => {
-    const text = buildPrompt(DEFAULT_TEMPLATE, { fecha: '28 oct', objetivo: 'Pedir en un restaurante', habilidad: 'Interacción oral', rol: 'un serveur', dificultad: 'fácil', referencia: 'Édito B1 · Unidad 3', expresion1: 'je voudrais', expresion2: 'l’addition', errores: 'au le' });
-    assert.match(text, /Pedir en un restaurante/);
+    const obj = newObjective({ title: 'Pedir en un restaurante', skill: 'escucha', description: 'Pido sin leer.' });
+    const text = buildPrompt(DEFAULT_TEMPLATE, { ...objectiveValues(obj), estados: statusDefinitions(), fecha: '28 oct', rol: 'un serveur', dificultad: 'fácil', referencia: 'Édito B1 · Unidad 3', expresion1: 'je voudrais', expresion2: 'l’addition', errores: 'au le' });
+    assert.match(text, /Objetivo: Pedir en un restaurante/);
+    assert.match(text, /Cómo sabré que lo logré: Pido sin leer\./);
+    assert.match(text, /Tipo de práctica: escucha: /, 'el modo depende de la habilidad');
     assert.ok(!/\{[a-z0-9]+\}/.test(text), 'no deben quedar marcadores sin reemplazar');
+    // Las definiciones de los estados van ANTES del REGISTRO, para que ChatGPT no las copie dentro.
+    const registroStart = text.indexOf('REGISTRO\n');
+    assert.ok(text.indexOf('Logrado de forma autónoma: Lo consigo sin ayuda') < registroStart);
+    assert.match(text, /Estado sugerido:\nExpresiones para recuperar:/);
     let pos = text.indexOf('REGISTRO\n');
     assert.ok(pos > 0);
     for (const f of REGISTRO_FIELDS) {
@@ -187,6 +196,36 @@ describe('Consigna y REGISTRO', () => {
     const p = parseRegistro('__Logro:__ usar window.__x y snake_case\nEstado sugerido: **En práctica**');
     assert.equal(p.fields.logro, 'usar window.__x y snake_case');
     assert.equal(p.status, 'practica');
+  });
+
+  test('el estado sugerido es el que se nombra primero', () => {
+    assert.equal(matchStatus('En práctica; todavía no logrado de forma autónoma'), 'practica');
+    assert.equal(matchStatus('Logrado de forma autónoma (antes: en práctica)'), 'autonomo');
+    assert.equal(matchStatus('nada'), null);
+  });
+
+  test('lee las correcciones «lo que escribí → forma correcta (explicación)»', () => {
+    const feedback = [
+      '1. Lo que está bien: buen vocabulario.',
+      '2. Prioridad: los artículos contractos.',
+      '3. Errores:',
+      '- *je suis allé au le marché* → *je suis allé au marché* (à + le = au)',
+      '- il faut que tu viens -> il faut que tu viennes (subjuntivo)',
+      '- Hier je suis resté → Hier, je suis resté.',
+      '4. Pista: piensa en el subjuntivo.',
+    ].join('\n');
+    assert.deepEqual(splitCorrections(feedback), [
+      { prompt: 'je suis allé au le marché', answer: 'je suis allé au marché', note: 'à + le = au' },
+      { prompt: 'il faut que tu viens', answer: 'il faut que tu viennes', note: 'subjuntivo' },
+      { prompt: 'Hier je suis resté', answer: 'Hier, je suis resté.', note: '' },
+    ]);
+  });
+
+  test('la consigna de corrección lleva el primer intento y no deja marcadores', () => {
+    const text = buildPrompt(CORRECTION_TEMPLATE, { ...objectiveValues(null), referencia: 'Édito B2 · Unidad 5', texto: 'Bien que je suis fatigué…' });
+    assert.ok(text.includes('"""\nBien que je suis fatigué…\n"""'));
+    assert.match(text, /lo que escribí → forma correcta/);
+    assert.ok(!/\{[a-z0-9]+\}/.test(text));
   });
 
   test('estados sugeridos reconocidos', () => {
@@ -547,6 +586,114 @@ describe('Sin conexión', () => {
     assert.equal(mac.data.sessions[0].draft, 'última versión');
     assert.equal(mac.conflict, null);
     mac.stop();
+  });
+});
+
+describe('Ayudas para orientarte (insights)', () => {
+  function data() {
+    const d = emptyData();
+    const a = newObjective({ title: 'A', skill: 'oral' }, '2026-10-01T10:00:00Z');
+    const b = newObjective({ title: 'B', skill: 'oral' }, '2026-10-01T10:00:00Z');
+    const c = newObjective({ title: 'C', skill: 'lectura' }, '2026-10-01T10:00:00Z');
+    a.status = 'practica';
+    b.status = 'apoyo';
+    c.status = 'pendiente';
+    d.objectives.push(a, b, c);
+    const s1 = newSession({ minutes: 30, objectiveId: a.id, ref: { book: 'B1', unit: '10' } }, '2026-10-27T18:00:00.000Z');
+    s1.closedAt = '2026-10-27T18:40:00.000Z';
+    s1.closing = { achievement: 'x', difficulty: 'los pronombres y y en', nextStep: 'repasar y/en' };
+    const s2 = newSession({ minutes: 15, objectiveId: b.id, ref: { book: 'B1', unit: '2' } }, '2026-10-20T18:00:00.000Z');
+    d.sessions.push(s1, s2);
+    const conv = newConversation({ objectiveId: a.id, ref: { book: 'B1', unit: '10', page: '120' } }, '2026-10-28T18:00:00.000Z');
+    conv.registro = 'Logro: bien\nPrioridad: el subjuntivo\nSiguiente práctica: hablar de deseos';
+    conv.registroAt = '2026-10-28T18:30:00.000Z';
+    d.conversations.push(conv);
+    const card = newCard({ kind: 'expresion', prompt: 'p', answer: 'r' }, '2026-10-26');
+    card.reviews = [{ day: '2026-10-27', result: 'sin' }, { day: '2026-10-20', result: 'no' }];
+    d.cards.push(card);
+    return { d, a, b, c, s1, conv };
+  }
+
+  test('sugiere el objetivo en práctica que hace más tiempo que no trabajas', () => {
+    const { d, b } = data();
+    const s = suggestObjective(d, '2026-10-29');
+    assert.equal(s.objective.id, b.id); // A se trabajó ayer; B hace 9 días; C está pendiente (va después)
+    assert.equal(s.days, 9);
+  });
+
+  test('el siguiente paso más reciente puede venir de un REGISTRO', () => {
+    const { d, conv } = data();
+    const next = latestNextStep(d);
+    assert.equal(next.text, 'hablar de deseos');
+    assert.equal(next.href, `#/conversacion/${conv.id}`);
+  });
+
+  test('semanas de lunes a domingo y recuentos sin niveles', () => {
+    assert.equal(weekStart('2026-10-28'), '2026-10-26'); // miércoles → lunes
+    assert.equal(weekStart('2026-11-01'), '2026-10-26'); // domingo → lunes anterior
+    assert.equal(weekStart('2026-10-26'), '2026-10-26');
+    const { d } = data();
+    const weeks = weeklyActivity(d, '2026-10-29', 3);
+    assert.deepEqual(weeks.map((w) => w.start), ['2026-10-26', '2026-10-19', '2026-10-12']);
+    assert.deepEqual([weeks[0].sessions, weeks[0].conversations, weeks[0].reviews], [1, 1, 1]);
+    assert.deepEqual([weeks[1].sessions, weeks[1].conversations, weeks[1].reviews], [1, 0, 1]);
+  });
+
+  test('unidades trabajadas, uso de una referencia y dificultades', () => {
+    const { d, a } = data();
+    const units = unitsWorked(d);
+    assert.deepEqual(units.B1.map((u) => [u.unit, u.sessions, u.conversations]), [['2', 1, 0], ['10', 1, 1]]);
+    const ref = { id: 'r1', book: 'B1', unit: '10', page: '120' };
+    assert.equal(referenceUsage(d, ref).conversations, 1);
+    assert.deepEqual(recentDifficulties(d).map((x) => x.text), ['el subjuntivo', 'los pronombres y y en']);
+    assert.equal(lastActivity(d, a.id), '2026-10-28T18:30:00.000Z');
+  });
+});
+
+describe('Sesión y repaso: detalles', () => {
+  test('plan sugerido por fases', () => {
+    assert.deepEqual(currentPhase(30, 0), { index: 0, name: 'Borrador', endsAt: 5 });
+    assert.deepEqual(currentPhase(30, 12), { index: 1, name: 'Primer intento', endsAt: 15 });
+    assert.equal(currentPhase(15, 14.5).name, 'Cierre');
+    assert.equal(currentPhase(40, 41).name, '');
+  });
+
+  test('la sesión como texto incluye solo lo escrito', () => {
+    const d = emptyData();
+    const s = newSession({ minutes: 15, objectiveId: '', ref: { book: 'B2', unit: '4' } }, '2026-10-28T18:00:00.000Z');
+    s.attempt1 = 'Premier essai';
+    s.feedback = 'essai → essai (bien)';
+    s.closing.achievement = 'Terminé';
+    const text = sessionAsText(s, d);
+    assert.match(text, /Referencia: Édito B2 · Unidad 4/);
+    assert.match(text, /Primer intento:\nPremier essai/);
+    assert.match(text, /Correcciones:\nessai → essai/);
+    assert.ok(!text.includes('Borrador'));
+    assert.match(text, /- Logro: Terminé/);
+  });
+
+  test('comparar la respuesta escrita: igual, solo acentos o distinta', () => {
+    assert.equal(compareAnswer("L’addition, s'il vous plaît !", "l'addition, s’il vous plaît"), 'igual');
+    assert.equal(compareAnswer('je suis alle au marche', 'je suis allé au marché'), 'acentos');
+    assert.equal(compareAnswer('je vais au marché', 'je suis allé au marché'), 'distinta');
+    assert.equal(compareAnswer('   ', 'x'), '');
+  });
+
+  test('las correcciones de una sesión se conservan al normalizar', () => {
+    const d = emptyData();
+    const s = newSession({ minutes: 30, objectiveId: '', ref: {} });
+    s.feedback = 'algo → otra cosa';
+    d.sessions.push(s);
+    assert.equal(normalizeData(clone(d)).sessions[0].feedback, 'algo → otra cosa');
+  });
+
+  test('el service worker guarda todos los archivos de la app (y ninguno que no exista)', () => {
+    const sw = readFileSync(new URL('../sw.js', import.meta.url), 'utf8');
+    const listed = [...sw.matchAll(/'((?:js|icons)\/[^']+)'/g)].map((m) => m[1]);
+    const root = new URL('../', import.meta.url);
+    const jsFiles = [...readdirSync(new URL('js/', root)).filter((f) => f.endsWith('.js')).map((f) => `js/${f}`), ...readdirSync(new URL('js/views/', root)).map((f) => `js/views/${f}`)];
+    for (const f of jsFiles) assert.ok(listed.includes(f), `falta en sw.js: ${f}`);
+    for (const f of listed) assert.ok(readFileSync(new URL(f, root)), f);
   });
 });
 

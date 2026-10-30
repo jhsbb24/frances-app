@@ -4,40 +4,48 @@
 // Ajustes. Las palabras entre llaves, como {objetivo}, se
 // reemplazan por lo que escribes en la pantalla Conversación.
 // ─────────────────────────────────────────────────────────────
-import { SKILLS } from './config.js';
+import { SKILLS, STATUSES, PRACTICE_MODES, skillLabel } from './config.js';
 
 export const PLACEHOLDERS = [
   ['{fecha}', 'fecha de la conversación'],
   ['{objetivo}', 'objetivo elegido'],
+  ['{criterio}', '«cómo sabré que lo logré» del objetivo'],
   ['{habilidad}', 'habilidad del objetivo'],
+  ['{modo}', 'tipo de práctica según la habilidad'],
   ['{rol}', 'papel de ChatGPT'],
   ['{dificultad}', 'dificultad'],
   ['{referencia}', 'referencia de Édito'],
   ['{expresion1}', 'primera expresión'],
   ['{expresion2}', 'segunda expresión'],
   ['{errores}', 'errores a repasar'],
+  ['{estados}', 'significado de los cinco estados'],
 ];
 
-export const DEFAULT_TEMPLATE = `Hola. Vamos a practicar francés por voz. Durante la práctica, háblame SOLO en francés.
+export const DEFAULT_TEMPLATE = `Hola. Vamos a practicar francés por voz. Durante la práctica háblame SOLO en francés; lo que te pida al final, en español.
 
 Fecha: {fecha}
 Objetivo: {objetivo}
+Cómo sabré que lo logré: {criterio}
 Habilidad: {habilidad}
+Tipo de práctica: {modo}
 Tu papel: {rol}
 Dificultad: {dificultad}
 Material (Édito): {referencia}
-Dos expresiones que quiero usar:
+Dos expresiones que quiero usar (crea situaciones para que las use):
 - {expresion1}
 - {expresion2}
-Errores que quiero repasar: {errores}
+Errores que quiero repasar (fíjate si los repito): {errores}
 
 Cómo trabajamos:
-1. Empieza tú, en tu papel, con una pregunta corta.
-2. Adapta tu francés a la dificultad indicada y espera siempre mi respuesta.
+1. No leas esta consigna en voz alta. Empieza tú, en tu papel, con una pregunta corta.
+2. Adapta tu francés a la dificultad indicada. Turnos cortos: una o dos frases, y espera mi respuesta.
 3. No me corrijas en cada frase: toma nota de mis errores.
-4. Si me bloqueo, dame primero una pista pequeña. Anota cada ayuda que me des.
+4. Si me bloqueo, dame primero una pista pequeña (una palabra o el inicio de la frase). Anota cada ayuda que me des.
 5. Cuando yo diga «on termine» (o tras unos 10 minutos), dime en español lo más importante que debo mejorar (una sola prioridad) y pídeme un segundo intento de la parte más difícil.
-6. Después del segundo intento, escribe en texto y en español el REGISTRO, con exactamente este formato:
+6. Cuando te pida «REGISTRO», escríbelo en texto (no solo por voz), en español, con exactamente el formato de abajo.
+
+Para «Estado sugerido» usa uno solo de estos estados:
+{estados}
 
 REGISTRO
 Fecha y sesión: {fecha}
@@ -48,11 +56,43 @@ Apoyos durante el intento:
 Logro:
 Prioridad:
 Segundo intento:
-Estado sugerido: (uno solo de estos: Pendiente de observar / En práctica / Logrado con apoyo / Logrado de forma autónoma / Transferido)
+Estado sugerido:
 Expresiones para recuperar: (una por línea, así: expresión en francés = significado en español)
 Siguiente práctica:
 
 No me asignes un nivel del MCER.`;
+
+/** Consigna para pedir a ChatGPT que corrija el primer intento de una sesión. */
+export const CORRECTION_TEMPLATE = `Hola. Estudio francés con el libro Édito. Corrige mi texto, pero NO lo reescribas entero: quiero hacer yo el segundo intento.
+
+Objetivo: {objetivo}
+Cómo sabré que lo logré: {criterio}
+Habilidad: {habilidad}
+Material (Édito): {referencia}
+
+Mi primer intento:
+"""
+{texto}
+"""
+
+Responde en español, breve, con este formato:
+1. Lo que está bien (una o dos cosas).
+2. Prioridad: el aspecto que más mejoraría mi texto (uno solo).
+3. Errores: uno por línea, así: lo que escribí → forma correcta (explicación muy corta)
+4. Una pista para mi segundo intento, sin darme el texto corregido.`;
+
+/** Los cinco estados con su significado, uno por línea. */
+export const statusDefinitions = () => STATUSES.map((st) => `- ${st.label}: ${st.help}`).join('\n');
+
+/** Valores de la plantilla que salen del objetivo. */
+export function objectiveValues(obj) {
+  return {
+    objetivo: obj?.title?.trim() || '(sin especificar)',
+    criterio: obj?.description?.trim() || '(sin especificar)',
+    habilidad: obj ? skillLabel(obj.skill) : 'Interacción oral',
+    modo: PRACTICE_MODES[obj?.skill] || PRACTICE_MODES.oral,
+  };
+}
 
 /** Reemplaza {marcadores} por sus valores. Los desconocidos se quedan igual. */
 export function buildPrompt(template, values) {
@@ -120,14 +160,23 @@ export function parseRegistro(text) {
   };
 }
 
+const STATUS_PATTERNS = [
+  ['transferido', /transferid/],
+  ['autonomo', /autonom/],
+  ['apoyo', /con apoyo/],
+  ['practica', /practica/],
+  ['pendiente', /pendiente|observar/],
+];
+
+/** El estado que se nombra PRIMERO en el texto («En práctica; aún no autónomo» → En práctica). */
 export function matchStatus(text) {
   const n = plain(text);
-  if (/transferid/.test(n)) return 'transferido';
-  if (/autonom/.test(n)) return 'autonomo';
-  if (/con apoyo/.test(n)) return 'apoyo';
-  if (/practica/.test(n)) return 'practica';
-  if (/pendiente|observar/.test(n)) return 'pendiente';
-  return null;
+  let best = null;
+  for (const [id, re] of STATUS_PATTERNS) {
+    const m = re.exec(n);
+    if (m && (!best || m.index < best.index)) best = { id, index: m.index };
+  }
+  return best ? best.id : null;
 }
 
 export function matchSkill(text) {
@@ -139,7 +188,30 @@ export function matchSkill(text) {
   return SKILLS.find((s) => n.includes(plain(s.label)))?.id || null;
 }
 
-const stripQuotes = (s) => s.replace(/^["'«“‘\s]+|["'»”’\s]+$/g, '').trim();
+const stripQuotes = (s) => s.replace(/^["'«“‘*_\s]+|["'»”’*_\s]+$/g, '').trim();
+
+/**
+ * Correcciones de ChatGPT: «lo que escribí → forma correcta (explicación)».
+ * Devuelve tarjetas de error: { prompt: lo que escribí, answer: forma correcta, note }.
+ * Las líneas sin flecha se ignoran.
+ */
+export function splitCorrections(text) {
+  return String(text || '')
+    .normalize('NFC')
+    .split(/\n/)
+    .map(cleanLine)
+    .map((line) => line.match(/^(.+?)\s*(?:→|->|⟶|=>)\s*(.+)$/))
+    .filter(Boolean)
+    .map(([, wrong, right]) => {
+      const explained = right.match(/^(.*?)\s*\(([^()]*)\)\s*\.?$/);
+      return {
+        prompt: stripQuotes(wrong.replace(/^(?:errores?|error)\s*:\s*/i, '')),
+        answer: stripQuotes(explained ? explained[1] : right),
+        note: explained ? explained[2].trim() : '',
+      };
+    })
+    .filter((c) => c.prompt && c.answer);
+}
 
 /** "s'en sortir = arreglárselas" → { answer: "s'en sortir", prompt: "arreglárselas" } */
 export function splitExpressions(text) {

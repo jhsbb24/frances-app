@@ -116,14 +116,15 @@ En el iPhone en vertical, la barra de abajo tiene **Hoy, Sesión, Conversar, Rep
 
 | Pantalla | Para qué sirve |
 | --- | --- |
-| **Hoy** | Continuar la sesión abierta, empezar una nueva, ver tu «siguiente paso», la conversación que espera su REGISTRO y los repasos de hoy. |
-| **Sesión** | Eliges **15, 30 o 40 minutos** y un **objetivo**; anotas la **referencia de Édito** (libro, unidad, página, nota). Escribes **borrador, primer intento y segundo intento**. Puedes crear **tarjetas** con expresiones o errores. Al final, un **cierre** de 3 campos: logro, dificultad y siguiente paso. **Pausar y salir** guarda todo aunque no hayas terminado. |
-| **Conversación** | Arma la **consigna para ChatGPT** con una plantilla (objetivo, rol, dificultad, referencia, dos expresiones y errores a repasar). Puedes editarla antes de **Copiar consigna** y **Abrir ChatGPT**. Al volver, pega el **REGISTRO**: se guarda tal cual. La app te **propone** cambiar el estado del objetivo o crear tarjetas, pero **no cambia nada hasta que confirmas**. |
-| **Biblioteca** | Tus referencias de Édito B1 y B2: edición, unidad, página, enlace de audio y notas. Con buscador. |
-| **Objetivos** | Cada objetivo tiene una **habilidad** (lectura, escucha, escritura, interacción oral) y un **estado**: Pendiente de observar → En práctica → Logrado con apoyo → Logrado de forma autónoma → Transferido. Cambiar de estado **pide un motivo** y queda en el historial. |
-| **Repaso** | Tarjetas con intervalos de **1, 3, 7 y 14 días**. *Sin ayuda* pasa al siguiente intervalo; *Con ayuda* no avanza y vuelve a salir hoy (si otra vez necesitas ayuda, vuelve mañana); *No lo logré* vuelve mañana desde el principio. Si vuelves después de una pausa, **Reprogramar** reparte las atrasadas en varios días (máximo por día que tú eliges) en vez de acumularlas. |
-| **Progreso** | Objetivos por habilidad y estado, y tus últimas evidencias, con filtro por habilidad. No convierte minutos ni rachas en niveles MCER. |
+| **Hoy** | Continuar la sesión abierta, empezar una nueva y ver los repasos de hoy. También: **primeros pasos** (mientras empiezas), tu **siguiente paso** más reciente (de una sesión o de un REGISTRO), una **sugerencia** del objetivo que hace más tiempo que no practicas y la conversación que espera su REGISTRO. |
+| **Sesión** | Eliges **15, 30 o 40 minutos** y un **objetivo**; anotas la **referencia de Édito** (libro, unidad, página, nota; se copia la de tu última sesión). Debajo del cronómetro hay un **plan sugerido por fases**. Escribes **borrador y primer intento**; con **Copiar consigna de corrección** ChatGPT te señala los errores sin reescribirte el texto; pegas su respuesta en **Correcciones** y conviertes las líneas «lo que escribí → forma correcta» en **tarjetas** con un toque. Luego, **segundo intento** y **cierre** de 3 campos (logro, dificultad, siguiente paso), con un botón para **cambiar el estado del objetivo** usando el logro como motivo. **Pausar y salir** guarda todo; **Copiar como texto** sirve para compartir la sesión. Hay buscador en la lista de sesiones. |
+| **Conversación** | Arma la **consigna para ChatGPT** con una plantilla (objetivo, criterio de logro, tipo de práctica según la habilidad, rol, dificultad, referencia, dos expresiones, errores a repasar y el significado de los estados). Puedes editarla antes de **Copiar consigna** y **Abrir ChatGPT**. Al volver, pega el **REGISTRO**: se guarda tal cual. La app te **propone** cambiar el estado, crear tarjetas, **pasar logro/prioridad/siguiente práctica al cierre de la sesión** o **repetir la práctica** con la prioridad como error a repasar, pero **no cambia nada hasta que confirmas**. Hay buscador. |
+| **Biblioteca** | Tus referencias de Édito B1 y B2: edición, unidad, página, enlace de audio y notas. Con buscador, cuántas veces usaste cada una y **Empezar sesión** con esa referencia. |
+| **Objetivos** | Cada objetivo tiene una **habilidad** (lectura, escucha, escritura, interacción oral), un criterio «cómo sabré que lo logré» y un **estado** (con su significado a la vista): Pendiente de observar → En práctica → Logrado con apoyo → Logrado de forma autónoma → Transferido. Cambiar de estado **pide un motivo** y queda en el historial. Ves cuándo lo practicaste por última vez y puedes empezar una sesión o una conversación desde ahí. |
+| **Repaso** | Tarjetas con intervalos de **1, 3, 7 y 14 días**. *Sin ayuda* pasa al siguiente intervalo; *Con ayuda* no avanza y vuelve a salir hoy (si otra vez necesitas ayuda, vuelve mañana); *No lo logré* vuelve mañana desde el principio. Puedes **escribir la respuesta** antes de verla (te avisa si solo fallan los acentos). En el Mac: Espacio para ver la respuesta y 1, 2, 3 para responder. Tras una pausa, **Reprogramar** reparte las atrasadas en varios días. El número de repasos de hoy aparece junto a «Repaso». |
+| **Progreso** | Objetivos por habilidad y estado, últimas evidencias, **dificultades y prioridades recientes**, **unidades de Édito trabajadas** y **actividad por semana** (solo recuentos). Con filtro por habilidad. No convierte minutos ni rachas en niveles MCER. |
 | **Ajustes** | Token, nombre del dispositivo, plantilla de la consigna, **Exportar JSON** e **Importar JSON** (con resumen antes de aplicar) y copias de seguridad. |
+| **Ayuda** | Una guía corta dentro de la app: rutina sugerida, cómo usar ChatGPT Voice, cómo corregir un texto y qué significa cada estado. |
 
 **Los días de repaso** se cuentan siempre con la hora de **Vancouver** (`America/Vancouver`), aunque viajes o el dispositivo tenga otra zona horaria. Para cambiarla, edita `TIME_ZONE` en `js/config.js`.
 
@@ -146,7 +147,11 @@ Expresiones para recuperar:   (una por línea: expresión en francés = signific
 Siguiente práctica:
 ```
 
-Puedes cambiar la plantilla en **Ajustes → Plantilla de la consigna** (y volver a la original con un botón).
+Antes del REGISTRO, la consigna explica a ChatGPT qué significa cada estado (por ejemplo, *Logrado con apoyo: lo consigo con alguna pista, modelo o ayuda*), para que su «Estado sugerido» tenga sentido.
+
+Puedes cambiar la plantilla en **Ajustes → Plantilla de la consigna** (y volver a la original con un botón). Marcadores disponibles: `{fecha}`, `{objetivo}`, `{criterio}`, `{habilidad}`, `{modo}`, `{rol}`, `{dificultad}`, `{referencia}`, `{expresion1}`, `{expresion2}`, `{errores}` y `{estados}`.
+
+> Si personalizas la plantilla, se usa siempre la tuya: las mejoras futuras de la original no se aplican solas. Puedes volver a la original con **Restaurar la plantilla original**.
 
 ## 7. Cómo funciona el guardado
 
@@ -223,6 +228,7 @@ js/model.js           estructura de tus datos
 js/review.js          cálculo de los repasos
 js/registro.js        plantilla de la consigna y lectura del REGISTRO
 js/diff.js            comparación de versiones («Ver ambas»)
+js/insights.js        sugerencias y recuentos (siguiente paso, unidades, actividad)
 js/dates.js           fechas en la zona horaria de Vancouver
 js/dom.js             piezas de interfaz (sin innerHTML)
 js/components.js      piezas que comparten varias pantallas
@@ -240,7 +246,8 @@ Las pruebas usan un **GitHub falso** (`tests/fake-github.js`) que imita la API e
 - que los repasos se programan con el día de **Vancouver** (incluso con el dispositivo en otra zona y en los cambios de hora);
 - que el REGISTRO pegado se guarda como texto y no cambia nada sin confirmar;
 - que el token nunca se muestra completo y solo se habla con `api.github.com`;
-- que las pantallas caben sin desbordes en iPhone (vertical y horizontal), iPad (vertical y horizontal) y Mac.
+- que las pantallas caben sin desbordes en iPhone (vertical y horizontal), iPad (vertical y horizontal) y Mac;
+- las ayudas para estudiar: corrección y tarjetas desde los errores, pasar el REGISTRO al cierre, repetir una práctica, sugerencias de Hoy, escribir la respuesta en Repaso y los atajos de teclado.
 
 Para ejecutarlas en tu Mac necesitas [Node.js](https://nodejs.org) 20 o más nuevo:
 

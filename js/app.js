@@ -8,6 +8,8 @@ import { h, icon, toast, closeTransientDialogs, refitAll, openDialog } from './d
 import { createGitHubApi } from './github.js';
 import { local, browserStorage, deviceName } from './local.js';
 import { SyncEngine } from './sync.js';
+import { today } from './dates.js';
+import { dueCards } from './review.js';
 import { openConflictDialog, closeConflictDialogIfResolved } from './views/conflicto.js';
 import * as Hoy from './views/hoy.js';
 import * as Sesion from './views/sesion.js';
@@ -18,6 +20,7 @@ import * as Repaso from './views/repaso.js';
 import * as Progreso from './views/progreso.js';
 import * as Ajustes from './views/ajustes.js';
 import * as Mas from './views/mas.js';
+import * as Ayuda from './views/ayuda.js';
 
 const ROUTES = {
   hoy: { view: Hoy.render, title: 'Hoy' },
@@ -30,6 +33,7 @@ const ROUTES = {
   progreso: { view: Progreso.render, title: 'Progreso' },
   ajustes: { view: Ajustes.render, title: 'Ajustes' },
   mas: { view: Mas.render, title: 'Más' },
+  ayuda: { view: Ayuda.render, title: 'Ayuda' },
 };
 
 // Barra de navegación. En el iPhone en vertical solo caben 5:
@@ -43,9 +47,10 @@ const NAV = [
   { id: 'objetivos', label: 'Objetivos', icon: 'objetivo' },
   { id: 'progreso', label: 'Progreso', icon: 'progreso' },
   { id: 'ajustes', label: 'Ajustes', icon: 'ajustes' },
+  { id: 'ayuda', label: 'Ayuda', icon: 'ayuda' },
   { id: 'mas', label: 'Más', icon: 'mas', phone: true, phoneOnly: true },
 ];
-const IN_MORE = new Set(['biblioteca', 'objetivos', 'progreso', 'ajustes', 'mas']);
+const IN_MORE = new Set(['biblioteca', 'objetivos', 'progreso', 'ajustes', 'mas', 'ayuda']);
 
 const api = createGitHubApi({ getToken: () => local.get('token') || '', getRepo: () => local.get('repo') || DEFAULT_REPO });
 const sync = new SyncEngine({ api, storage: browserStorage, isOnline: () => navigator.onLine !== false, deviceName });
@@ -127,9 +132,20 @@ function buildNav() {
         icon(item.icon),
         h('span', { class: 'nav-label long', text: item.label }),
         h('span', { class: 'nav-label short', text: item.short || item.label }),
+        item.id === 'repaso' ? h('span', { class: 'nav-count', id: 'repasos-pendientes', hidden: true }) : null,
       ),
     ),
   );
+}
+
+/** Número de repasos de hoy junto a «Repaso» (no es una notificación). */
+function paintReviewCount() {
+  const el = document.getElementById('repasos-pendientes');
+  if (!el) return;
+  const n = dueCards(sync.data.cards, today()).length;
+  el.hidden = n === 0;
+  el.textContent = n > 99 ? '99+' : String(n);
+  el.closest('.nav-item').setAttribute('aria-label', n ? `Repaso, ${n} para hoy` : 'Repaso');
 }
 
 function paintNav(name) {
@@ -173,6 +189,7 @@ statusButton.addEventListener('click', () => {
 sync.on((type) => {
   if (type === 'status') {
     paintStatus();
+    paintReviewCount();
     closeConflictDialogIfResolved(ctx);
   }
   if (type === 'data') renderRoute({ keepPosition: true });
@@ -205,10 +222,30 @@ window.addEventListener('online', () => {
 });
 window.addEventListener('offline', () => sync.markOffline());
 
-// Mientras escribes en el iPhone, se oculta la barra de abajo.
+// Con la app abierta (por ejemplo en el Mac), mirar cada 2 minutos si
+// otro dispositivo guardó algo. Así hay menos conflictos.
+setInterval(() => {
+  paintReviewCount(); // por si cambió el día
+  if (document.visibilityState === 'visible' && !sync.state.dirty && !sync.pushing && !sync.conflict) pullSoon();
+}, 120000);
+
+// Con el teclado del iPhone abierto, se oculta la barra de abajo para dejar
+// más sitio. Se comprueba con un pequeño retraso: si la barra apareciera en el
+// mismo instante del toque, podría «robar» el toque a un botón.
 const isTypingField = (el) => el?.matches?.('textarea, select, input:not([type=checkbox]):not([type=radio]):not([type=button]):not([type=file])');
-document.addEventListener('focusin', (e) => document.body.classList.toggle('typing', isTypingField(e.target)));
-document.addEventListener('focusout', () => setTimeout(() => document.body.classList.toggle('typing', isTypingField(document.activeElement)), 60));
+const viewport = window.visualViewport;
+const updateTyping = () => {
+  const keyboardOpen = viewport ? viewport.height < window.innerHeight * 0.8 : false;
+  document.body.classList.toggle('typing', keyboardOpen && isTypingField(document.activeElement));
+};
+let typingTimer = null;
+const updateTypingSoon = () => {
+  clearTimeout(typingTimer);
+  typingTimer = setTimeout(updateTyping, 350);
+};
+viewport?.addEventListener('resize', updateTypingSoon);
+document.addEventListener('focusin', updateTypingSoon);
+document.addEventListener('focusout', updateTypingSoon);
 
 // Los textareas crecen con su contenido.
 document.addEventListener('toggle', (e) => refitAll(e.target), true);
@@ -233,6 +270,7 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || ['localho
 buildNav();
 if (!location.hash) history.replaceState(null, '', '#/hoy');
 paintStatus();
+paintReviewCount();
 renderRoute();
 lastPull = Date.now();
 sync.syncNow();

@@ -13,7 +13,7 @@ import { CARD_KINDS, short } from '../components.js';
 
 const FIELD_LABELS = {
   objectives: { title: 'Objetivo', skill: 'Habilidad', status: 'Estado', description: 'Cómo sabré que lo logré', history: 'Historial de estados' },
-  sessions: { minutes: 'Duración (min)', objectiveId: 'Objetivo', ref: 'Referencia', draft: 'Borrador', attempt1: 'Primer intento', attempt2: 'Segundo intento', closing: 'Cierre', closedAt: 'Cerrada', timer: 'Cronómetro' },
+  sessions: { minutes: 'Duración (min)', objectiveId: 'Objetivo', ref: 'Referencia', draft: 'Borrador', attempt1: 'Primer intento', feedback: 'Correcciones', attempt2: 'Segundo intento', closing: 'Cierre', closedAt: 'Cerrada', timer: 'Cronómetro' },
   conversations: { objectiveId: 'Objetivo', role: 'Rol', difficulty: 'Dificultad', ref: 'Referencia', expr1: 'Expresión 1', expr2: 'Expresión 2', errors: 'Errores a repasar', prompt: 'Consigna', registro: 'REGISTRO', actions: 'Acciones confirmadas' },
   references: { book: 'Libro', edition: 'Edición', unit: 'Unidad', page: 'Página', audioUrl: 'Audio', notes: 'Notas' },
   cards: { kind: 'Tipo', prompt: 'Pista', answer: 'Respuesta', note: 'Nota', due: 'Próximo repaso', step: 'Intervalo', archived: 'Archivada', reviews: 'Repasos' },

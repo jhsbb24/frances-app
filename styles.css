@@ -262,6 +262,27 @@ main:focus {
   display: flex;
 }
 
+.nav-item {
+  position: relative;
+}
+
+/* Número de repasos de hoy (neutro: no es una notificación) */
+.nav-count {
+  position: absolute;
+  top: 2px;
+  left: calc(50% + 6px);
+  min-width: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  border: 1px solid var(--primary);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+
 .nav-item.active {
   color: var(--primary);
 }
@@ -341,6 +362,11 @@ main:focus {
 
   .nav-label.short {
     display: none;
+  }
+
+  .nav-count {
+    position: static;
+    margin-left: auto;
   }
 
   main {
@@ -950,6 +976,22 @@ textarea:focus {
   accent-color: var(--primary);
 }
 
+.radio-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.radio-title {
+  font-weight: 600;
+}
+
+.radio-help {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.35;
+}
+
 .radio:has(input:checked) {
   border-color: var(--primary);
   background: var(--primary-soft);
@@ -966,6 +1008,52 @@ textarea:focus {
   width: 1px;
   height: 1px;
   opacity: 0;
+}
+
+/* ── Hoy: primeros pasos ───────────────────────────────────── */
+
+.checklist {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+}
+
+.checklist li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+}
+
+.check-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border: 2px solid var(--border-strong);
+  border-radius: 50%;
+  font-weight: 800;
+}
+
+.checklist li.done {
+  color: var(--muted);
+}
+
+.checklist li.done .check-mark {
+  background: var(--ok-bg);
+  border-color: var(--ok-text);
+  color: var(--ok-text);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 /* ── Sesión: cronómetro ────────────────────────────────────── */
@@ -1014,6 +1102,43 @@ textarea:focus {
   font-weight: 600;
 }
 
+.phases {
+  margin: -6px 0 16px;
+}
+
+.phases ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 4px;
+  padding: 0;
+  list-style: none;
+}
+
+.phases li {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.phases li small {
+  font-weight: 500;
+}
+
+.phases li.done {
+  text-decoration: line-through;
+}
+
+.phases li.current {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--on-primary);
+}
+
 /* ── Repaso ────────────────────────────────────────────────── */
 
 .flash {
@@ -1044,6 +1169,35 @@ textarea:focus {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   margin: 16px 0;
+}
+
+#repaso-escribir {
+  min-height: 52px;
+}
+
+.answer-buttons:focus {
+  outline: none;
+}
+
+.compare {
+  margin: 6px 0;
+  font-weight: 600;
+}
+
+.compare:empty {
+  display: none;
+}
+
+.compare.igual {
+  color: var(--ok-text);
+}
+
+.compare.acentos {
+  color: var(--warn-text);
+}
+
+.compare.distinta {
+  color: var(--muted);
 }
 
 .answer-buttons .btn {

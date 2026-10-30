@@ -2,7 +2,9 @@
 // (edición, unidad, página, enlace de audio y notas), con búsqueda.
 // La app no incluye contenido de los libros: solo tus referencias.
 import { BOOKS } from '../config.js';
-import { h, chips, groupLabel, textField, empty, button, toast, confirmDialog, openDialog, externalLink } from '../dom.js';
+import { h, chips, groupLabel, textField, empty, button, linkButton, toast, confirmDialog, openDialog, externalLink } from '../dom.js';
+import { formatShort } from '../dates.js';
+import { referenceUsage } from '../insights.js';
 import { newReference, refText, safeUrl, nowIso } from '../model.js';
 import { plain } from '../registro.js';
 import { short } from '../components.js';
@@ -37,15 +39,21 @@ export function render(main, ctx) {
       return;
     }
     for (const r of refs) {
+      const use = referenceUsage(ctx.sync.data, r);
+      const used = use.sessions + use.conversations;
+      const usage = used
+        ? `Usada en ${[use.sessions && `${use.sessions} ${use.sessions === 1 ? 'sesión' : 'sesiones'}`, use.conversations && `${use.conversations} ${use.conversations === 1 ? 'conversación' : 'conversaciones'}`].filter(Boolean).join(' y ')} · última: ${formatShort(use.last)}`
+        : 'Todavía sin usar';
       list.append(
         h('article', { class: 'card ref-card' },
           h('div', { class: 'item-main' },
             h('p', { class: 'item-title', text: [`Édito ${r.book}`, r.unit && `Unidad ${r.unit}`, r.page && `p. ${r.page}`].filter(Boolean).join(' · ') }),
-            r.edition ? h('p', { class: 'item-meta', text: `Edición: ${r.edition}` }) : null,
+            h('p', { class: 'item-meta', text: [r.edition && `Edición: ${r.edition}`, usage].filter(Boolean).join(' · ') }),
             r.notes ? h('p', { class: 'pre item-text', text: r.notes }) : null,
           ),
           h('div', { class: 'row-actions' },
             r.audioUrl ? externalLink('Audio', r.audioUrl, 'btn secondary small') : null,
+            linkButton('Empezar sesión', `#/sesion/nueva/referencia/${r.id}`, 'secondary small'),
             button('Editar', () => openReferenceDialog(ctx, r.id, paint), 'secondary small'),
           ),
         ),
