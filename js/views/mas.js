@@ -3,6 +3,7 @@
 import { h, icon } from '../dom.js';
 
 const LINKS = [
+  { href: '#/plan', icon: 'plan', label: 'Plan de estudio', text: 'Qué unidad, página y actividades toca hacer' },
   { href: '#/biblioteca', icon: 'libro', label: 'Biblioteca', text: 'Tus referencias de Édito B1 y B2' },
   { href: '#/objetivos', icon: 'objetivo', label: 'Objetivos', text: 'Habilidades, estados e historial' },
   { href: '#/progreso', icon: 'progreso', label: 'Progreso', text: 'Objetivos por estado y evidencias' },

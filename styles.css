@@ -1056,6 +1056,108 @@ textarea:focus {
   white-space: nowrap;
 }
 
+/* ── Plan de estudio ───────────────────────────────────────── */
+
+.tasks {
+  margin: 8px 0;
+  padding-left: 24px;
+}
+
+.tasks li {
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+
+.tasks li.task-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  list-style: none;
+  margin-left: -24px;
+}
+
+.task-check label {
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.task-check input {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  margin: 2px 4px 0 0;
+  accent-color: var(--primary);
+}
+
+.task-check input:checked + label .task-text {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+
+.task-type {
+  display: inline-block;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.audio-note {
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.method summary {
+  font-size: 16px;
+}
+
+.step-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.step-list li a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 6px 4px;
+  border-top: 1px solid var(--border);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.step-list li.done a {
+  color: var(--muted);
+}
+
+.step-list li.done .check-mark {
+  background: var(--ok-bg);
+  border-color: var(--ok-text);
+  color: var(--ok-text);
+}
+
+.step-list li.next a {
+  font-weight: 700;
+}
+
+.step-name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.step-name small {
+  color: var(--muted);
+  font-weight: 400;
+}
+
 /* ── Sesión: cronómetro ────────────────────────────────────── */
 
 .timer {

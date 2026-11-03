@@ -12,6 +12,18 @@ export function render(main) {
     h('p', { class: 'subtitle', text: 'Una guía corta. Los pasos para instalarla y crear el token están en el README.' }),
 
     section(
+      'El plan de estudio',
+      list([
+        'En Hoy verás «Tu plan de estudio»: el próximo paso, con la unidad, la página, las actividades y el audio.',
+        'Toca «Empezar este paso»: se abre una sesión ya preparada, con la lista de tareas para ir marcando.',
+        'Trabaja con el libro abierto y escribe tus intentos en la app. Cada tarea tiene un método («Cómo trabajar cada tarea»).',
+        'Al pulsar «Terminar sesión», el paso queda hecho y el plan pasa al siguiente. Si no terminas, «Pausar y salir» y sigues otro día.',
+        'Algunos pasos son de conversación: «Preparar conversación» trae el rol y las expresiones listos para ChatGPT Voice.',
+        'El plan completo está en Más → Plan de estudio. Se carga con Ajustes → Importar JSON → «Añadir lo nuevo».',
+      ], true),
+    ),
+
+    section(
       'Una rutina sencilla',
       list([
         'Elige un objetivo concreto (por ejemplo, «Reservar una mesa por teléfono») y la página de Édito que vas a usar.',

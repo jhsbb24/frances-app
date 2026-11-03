@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 
 const { dayKey, today, addDays } = await import('../js/dates.js');
 const { schedule, applyAnswer, dueCards, overdueCards, planReschedule, firstDue, compareAnswer } = await import('../js/review.js');
-const { newCard, newSession, newReference, newObjective, newConversation, emptyData, normalizeData, clone, currentPhase, sessionAsText } = await import('../js/model.js');
+const { newCard, newSession, newReference, newObjective, newConversation, emptyData, normalizeData, clone, currentPhase, sessionAsText, nextStep, addMissing } = await import('../js/model.js');
 const { parseRegistro, buildPrompt, DEFAULT_TEMPLATE, CORRECTION_TEMPLATE, REGISTRO_FIELDS, splitExpressions, splitCorrections, matchStatus, objectiveValues, statusDefinitions } = await import('../js/registro.js');
 const { suggestObjective, latestNextStep, weekStart, weeklyActivity, unitsWorked, referenceUsage, recentDifficulties, lastActivity } = await import('../js/insights.js');
 const { readFileSync, readdirSync } = await import('node:fs');
@@ -694,6 +694,85 @@ describe('Sesión y repaso: detalles', () => {
     const jsFiles = [...readdirSync(new URL('js/', root)).filter((f) => f.endsWith('.js')).map((f) => `js/${f}`), ...readdirSync(new URL('js/views/', root)).map((f) => `js/views/${f}`)];
     for (const f of jsFiles) assert.ok(listed.includes(f), `falta en sw.js: ${f}`);
     for (const f of listed) assert.ok(readFileSync(new URL(f, root)), f);
+  });
+});
+
+describe('Plan de estudio', () => {
+  const step = (id, order, extra = {}) => ({ id, order, createdAt: '2026-11-01T00:00:00.000Z', book: 'B1', unit: '1', unitTitle: 'U1', title: `Paso ${id}`, pages: '12', minutes: 30, instructions: [{ type: 'escucha', text: 'Documento A (p. 12).' }], audio: '', objectiveIds: ['o1'], conversation: null, doneAt: null, sessionId: '', ...extra });
+
+  test('normaliza los pasos (tipos desconocidos → nota, sin texto → fuera)', () => {
+    const d = normalizeData({ app: 'mi-frances', steps: [step('a', 2, { instructions: [{ type: 'raro', text: 'x' }, { type: 'lee', text: '' }, 'texto suelto'], minutes: 99 })] });
+    assert.deepEqual(d.steps[0].instructions, [{ type: 'nota', text: 'x' }, { type: 'nota', text: 'texto suelto' }]);
+    assert.equal(d.steps[0].minutes, 30);
+  });
+
+  test('el siguiente paso es el primero sin hacer, por orden', () => {
+    const d = normalizeData({ app: 'mi-frances', steps: [step('c', 30), step('a', 10, { doneAt: '2026-11-02T00:00:00.000Z' }), step('b', 20)] });
+    assert.equal(nextStep(d).id, 'b');
+    d.steps.forEach((s) => (s.doneAt = '2026-11-02T00:00:00.000Z'));
+    assert.equal(nextStep(d), null);
+  });
+
+  test('«Añadir lo nuevo» no borra nada y conserva el progreso del plan', () => {
+    const mine = normalizeData({
+      app: 'mi-frances',
+      objectives: [{ id: 'o1', title: 'Mi versión', skill: 'oral' }],
+      steps: [step('a', 10, { doneAt: '2026-11-02T00:00:00.000Z', sessionId: 's1' }), step('b', 20)],
+      cards: [{ id: 'k1', answer: 'mía', due: '2026-11-03' }],
+    });
+    const incoming = normalizeData({
+      app: 'mi-frances',
+      objectives: [{ id: 'o1', title: 'Versión del archivo', skill: 'oral' }, { id: 'o2', title: 'Nuevo', skill: 'escucha' }],
+      steps: [step('a', 10, { title: 'Paso a (texto mejorado)' }), step('b', 20), step('c', 30)],
+    });
+    const { data, added, updated } = addMissing(mine, incoming);
+    assert.deepEqual(added, { objectives: 1, sessions: 0, conversations: 0, references: 0, cards: 0, steps: 1 });
+    assert.equal(updated, 1);
+    assert.equal(data.objectives.find((o) => o.id === 'o1').title, 'Mi versión', 'lo tuyo no se toca');
+    assert.equal(data.cards.length, 1);
+    const a = data.steps.find((s) => s.id === 'a');
+    assert.equal(a.title, 'Paso a (texto mejorado)');
+    assert.equal(a.doneAt, '2026-11-02T00:00:00.000Z', 'se conserva lo hecho');
+    assert.equal(a.sessionId, 's1');
+    assert.equal(addMissing(data, incoming).updated, 0, 'importar dos veces no cambia nada');
+  });
+
+  test('al cargar una versión nueva del plan se quita lo antiguo que no tocaste', () => {
+    const ref = (id, notes, extra = {}) => ({ id, createdAt: '2026-11-01T00:00:00.000Z', updatedAt: '2026-11-01T00:00:00.000Z', book: 'B1', unit: '2', page: '27', notes, ...extra });
+    const mine = normalizeData({
+      app: 'mi-frances',
+      steps: [step('plan-b1-u02-01', 10, { doneAt: '2026-11-02T00:00:00.000Z' }), step('plan-b1-u02-02', 20), step('plan-b2-u01-01', 30)],
+      references: [
+        ref('ref-b1-u02-02-1', 'Audio: versión antigua'),
+        ref('ref-b1-u02-05-1', 'Gramática editada por mí', { updatedAt: '2026-11-03T00:00:00.000Z', audioUrl: 'https://example.com/a.mp3' }),
+        ref('ref-b1-p027-gramatica-1', 'Gramática: texto viejo'),
+        ref('ref_mia123', 'Mi propia ficha'),
+      ],
+    });
+    const incoming = normalizeData({
+      app: 'mi-frances',
+      steps: [step('plan-b1-u02-03', 40)],
+      references: [ref('ref-b1-p027-gramatica-1', 'Gramática: L’interrogation'), ref('ref-b1-p027-audio-1', 'Audio: Documento B')],
+    });
+    const { data, removed, updated } = addMissing(mine, incoming);
+    assert.deepEqual(data.steps.map((s) => s.id).sort(), ['plan-b1-u02-01', 'plan-b1-u02-03', 'plan-b2-u01-01'], 'se queda el hecho y el de otro plan');
+    assert.deepEqual(removed, { steps: 1, references: 1 });
+    assert.equal(updated, 1);
+    const ids = data.references.map((r) => r.id);
+    assert.ok(ids.includes('ref-b1-u02-05-1'), 'la ficha que editaste se conserva');
+    assert.ok(ids.includes('ref_mia123'), 'las fichas tuyas no se tocan');
+    assert.ok(!ids.includes('ref-b1-u02-02-1'));
+    assert.equal(data.references.find((r) => r.id === 'ref-b1-p027-gramatica-1').notes, 'Gramática: L’interrogation');
+  });
+
+  test('una sesión recuerda su paso y las tareas marcadas', () => {
+    const s = newSession({ minutes: 30, objectiveId: '', ref: {}, stepId: 'a' });
+    s.stepChecks = [0, 2, -1, 'x'];
+    const d = emptyData();
+    d.sessions.push(s);
+    const n = normalizeData(clone(d)).sessions[0];
+    assert.equal(n.stepId, 'a');
+    assert.deepEqual(n.stepChecks, [0, 2]);
   });
 });
 

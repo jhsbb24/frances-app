@@ -4,7 +4,7 @@
 import { APP_VERSION, DEFAULT_REPO, DATA_PATH, TIME_ZONE } from '../config.js';
 import { h, section, textField, button, toast, confirmDialog, openDialog, downloadText, externalLink, fitTextarea } from '../dom.js';
 import { today, formatDateTime } from '../dates.js';
-import { normalizeData, countData } from '../model.js';
+import { normalizeData, countData, addMissing } from '../model.js';
 import { parseRepo, maskToken } from '../github.js';
 import { local, browserStorage, usedKB, detectDevice } from '../local.js';
 import { serialize } from '../sync.js';
@@ -172,37 +172,63 @@ const countsText = (data) => {
   return COLLECTIONS.map(({ key, label }) => `${label}: ${c[key]}`).join(' · ');
 };
 
-function summaryTable(current, incoming) {
+function summaryTable(current, incoming, added = null) {
   const a = countData(current);
   const b = countData(incoming);
   return h('table', { class: 'summary-table' },
-    h('thead', {}, h('tr', {}, h('th', { text: '' }), h('th', { text: 'Ahora' }), h('th', { text: 'En el archivo' }))),
-    h('tbody', {}, COLLECTIONS.map(({ key, label }) => h('tr', {}, h('th', { text: label }), h('td', { text: String(a[key]) }), h('td', { text: String(b[key]) })))),
+    h('thead', {}, h('tr', {}, h('th', { text: '' }), h('th', { text: 'Ahora' }), h('th', { text: 'En el archivo' }), added ? h('th', { text: 'Nuevos' }) : null)),
+    h('tbody', {}, COLLECTIONS.map(({ key, label }) => h('tr', {}, h('th', { text: label }), h('td', { text: String(a[key]) }), h('td', { text: String(b[key]) }), added ? h('td', { text: String(added[key]) }) : null))),
   );
 }
 
-function confirmReplace(ctx, incoming, { title, origin, message }) {
+/**
+ * Resumen antes de aplicar un archivo. Con allowMerge (importar), la
+ * opción principal es «Añadir lo nuevo», que no borra nada.
+ */
+function confirmReplace(ctx, incoming, { title, origin, message, allowMerge = false }) {
   const meta = incoming.meta?.updatedAt ? `Último cambio en el archivo: ${formatDateTime(incoming.meta.updatedAt)}${incoming.meta.device ? ` (${incoming.meta.device})` : ''}.` : '';
+  const merge = allowMerge ? addMissing(ctx.sync.data, incoming) : null;
+  const newCount = merge ? Object.values(merge.added).reduce((n, x) => n + x, 0) : 0;
+  const oldCount = merge ? merge.removed.steps + merge.removed.references : 0;
+  const actions = [{ label: 'Cancelar', class: 'secondary' }];
+  actions.push({
+    label: allowMerge ? 'Reemplazar todo' : 'Reemplazar mis datos',
+    class: 'danger',
+    onClick: () => {
+      ctx.sync.replaceAll(incoming, message);
+      toast('Datos reemplazados');
+      ctx.rerender();
+    },
+  });
+  if (merge) {
+    actions.push({
+      label: 'Añadir lo nuevo',
+      class: 'primary',
+      onClick: () => {
+        if (!newCount && !merge.updated && !oldCount) {
+          toast('No hay nada nuevo en el archivo');
+          return;
+        }
+        ctx.sync.replaceAll(merge.data, `${message.replace(/^Importar JSON/, 'Añadir desde JSON')}${merge.updated ? ` · ${merge.updated} elementos del plan actualizados` : ''}${oldCount ? ` · ${oldCount} antiguos quitados` : ''}`);
+        toast(`Añadido: ${newCount} elementos nuevos${merge.updated ? `, ${merge.updated} actualizados` : ''}`);
+        ctx.rerender();
+      },
+    });
+  }
   openDialog({
     title,
     content: [
       h('p', { text: origin }),
       meta ? h('p', { class: 'hint', text: meta }) : null,
-      summaryTable(ctx.sync.data, incoming),
-      h('p', { class: 'warning', text: 'Esto REEMPLAZA todos tus datos actuales por los del archivo. Antes guardo una copia de los actuales en este dispositivo, y la versión actual seguirá en el historial de GitHub.' }),
+      summaryTable(ctx.sync.data, incoming, merge?.added),
+      merge
+        ? h('p', {
+            text: `«Añadir lo nuevo» suma ${newCount} elementos${merge.updated ? ` y actualiza ${merge.updated} del plan` : ''}${oldCount ? `, y quita ${oldCount} pasos o fichas antiguas del plan que ya no existen` : ''}. Lo que hiciste o editaste se conserva, y no borra nada tuyo.`,
+          })
+        : null,
+      h('p', { class: 'warning', text: `${merge ? '«Reemplazar todo» ' : 'Esto '}REEMPLAZA todos tus datos actuales por los del archivo. Antes guardo una copia de los actuales en este dispositivo, y la versión actual seguirá en el historial de GitHub.` }),
     ],
-    actions: [
-      { label: 'Cancelar', class: 'secondary' },
-      {
-        label: 'Reemplazar mis datos',
-        class: 'danger',
-        onClick: () => {
-          ctx.sync.replaceAll(incoming, message);
-          toast('Datos reemplazados');
-          ctx.rerender();
-        },
-      },
-    ],
+    actions,
   });
 }
 
@@ -219,7 +245,7 @@ function dataSection(ctx) {
       openDialog({ title: 'No pude leer el archivo', content: h('p', { text: err instanceof SyntaxError ? 'El archivo no es un JSON válido.' : err.message }), actions: [{ label: 'Entendido', class: 'primary' }] });
       return;
     }
-    confirmReplace(ctx, incoming, { title: 'Importar JSON', origin: `Archivo: ${file.name}`, message: `Importar JSON (${countsText(incoming)})` });
+    confirmReplace(ctx, incoming, { title: 'Importar JSON', origin: `Archivo: ${file.name}`, message: `Importar JSON (${countsText(incoming)})`, allowMerge: true });
   });
 
   const backups = browserStorage.backups();

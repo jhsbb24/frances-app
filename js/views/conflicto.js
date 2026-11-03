@@ -17,6 +17,7 @@ const FIELD_LABELS = {
   conversations: { objectiveId: 'Objetivo', role: 'Rol', difficulty: 'Dificultad', ref: 'Referencia', expr1: 'Expresión 1', expr2: 'Expresión 2', errors: 'Errores a repasar', prompt: 'Consigna', registro: 'REGISTRO', actions: 'Acciones confirmadas' },
   references: { book: 'Libro', edition: 'Edición', unit: 'Unidad', page: 'Página', audioUrl: 'Audio', notes: 'Notas' },
   cards: { kind: 'Tipo', prompt: 'Pista', answer: 'Respuesta', note: 'Nota', due: 'Próximo repaso', step: 'Intervalo', archived: 'Archivada', reviews: 'Repasos' },
+  steps: { title: 'Paso', pages: 'Páginas', doneAt: 'Hecho', instructions: 'Tareas', sessionId: 'Sesión' },
   settings: { promptTemplate: 'Plantilla de la consigna' },
 };
 const IGNORED = new Set(['id', 'createdAt', 'updatedAt', 'repeatToday', 'promptEdited', 'registroAt', 'sessionId', 'source']);
@@ -64,7 +65,7 @@ export function openConflictDialog(ctx) {
     if (key === 'objectiveId') return objectiveName(value);
     if (key === 'ref') return refText(value) || '(sin referencia)';
     if (key === 'closing') return `Logro: ${value.achievement || '—'}\nDificultad: ${value.difficulty || '—'}\nSiguiente paso: ${value.nextStep || '—'}`;
-    if (key === 'closedAt') return formatDateTime(value);
+    if (key === 'closedAt' || key === 'doneAt') return formatDateTime(value);
     if (key === 'timer') return `${Math.round((value.elapsedMs || 0) / 60000)} min usados${value.runningSince ? ' (en marcha)' : ''}`;
     if (key === 'skill') return skillLabel(value);
     if (key === 'status') return statusLabel(value);
@@ -91,6 +92,8 @@ export function openConflictDialog(ctx) {
         return refText(x) || 'Referencia';
       case 'cards':
         return `Tarjeta: ${short(x.answer, 50)}`;
+      case 'steps':
+        return `Plan: ${x.book} · Unidad ${x.unit} · ${short(x.title, 50)}`;
       default:
         return 'Plantilla y ajustes';
     }

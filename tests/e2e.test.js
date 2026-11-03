@@ -143,6 +143,17 @@ function sampleData() {
   return { data: d, ids: { o1: o1.id, s1: s1.id, c1: c1.id } };
 }
 
+/** Añade un plan de estudio pequeño (inventado) a los datos de ejemplo. */
+function withPlan({ data, ids }) {
+  const base = { createdAt: '2026-11-01T00:00:00.000Z', updatedAt: '2026-11-01T00:00:00.000Z', book: 'B1', unit: '1', unitTitle: 'Unidad de prueba', minutes: 15, audio: '', conversation: null, doneAt: null, sessionId: '' };
+  data.steps = [
+    { ...base, id: 'plan-test-01', order: 10, title: 'Escuchar y hablar', pages: '12', audio: 'Audio de la p. 12.', objectiveIds: [ids.o1], instructions: [{ type: 'escucha', text: 'Documento de prueba (p. 12).' }, { type: 'habla', text: 'Presenta a una persona (p. 12).' }] },
+    { ...base, id: 'plan-test-02', order: 20, title: 'Gramática de prueba', pages: '14', objectiveIds: [ids.o1], instructions: [{ type: 'gramatica', text: 'Ejercicios de la página (p. 14).' }] },
+    { ...base, id: 'plan-test-03', order: 30, title: 'Conversación de prueba', pages: '11–24', objectiveIds: [ids.o1], instructions: [{ type: 'conversacion', text: 'Habla con ChatGPT Voice.' }], conversation: { role: 'un ami de la fac', expr1: 'À l’époque, on…', expr2: 'Je me souviens que…' } },
+  ];
+  return { data, ids };
+}
+
 // ─────────────────────────────────────────────────────────────
 
 describe('Guardar y cargar (GitHub simulado)', () => {
@@ -492,7 +503,7 @@ describe('Ajustes: token, exportar e importar', () => {
     assert.match(summary, /Tarjetas de repaso\s+5\s+6/);
     assert.equal(fake.json().references.length, 2, 'nada cambia antes de confirmar');
     await shot(page, 'mac-importar');
-    await page.getByRole('button', { name: 'Reemplazar mis datos' }).click();
+    await page.getByRole('button', { name: 'Reemplazar todo' }).click();
     await waitFor(() => fake.json().references.length === 1 && fake.json().cards.length === 6);
     assert.match(fake.commits.at(-1).message, /^Importar JSON/);
     const backups = await page.evaluate(() => JSON.parse(localStorage.getItem('miFrances.copias')));
@@ -563,12 +574,15 @@ describe('Ayudas para estudiar', () => {
     assert.equal(closing.difficulty, 'el artículo contracto «au».');
     assert.equal(fake.json().objectives.find((o) => o.id === ids.o1).status, 'practica', 'el estado no cambia sin confirmar');
 
-    const before = fake.json().conversations.length;
+    const known = new Set(fake.json().conversations.map((c) => c.id));
     await page.getByRole('button', { name: 'Repetir esta práctica' }).click();
-    await page.waitForFunction((id) => location.hash.startsWith('#/conversacion/') && !location.hash.endsWith(id), ids.c1);
-    assert.match(await page.inputValue('#conv-errores'), /el artículo contracto «au»/);
+    await waitFor(() => fake.json().conversations.length === known.size + 1);
+    const created = fake.json().conversations.find((c) => !known.has(c.id));
+    assert.match(created.errors, /el artículo contracto «au»/);
+    assert.equal(created.role, 'un serveur dans un bistrot parisien');
+    // La pantalla nueva se dibuja justo después de cambiar la dirección: esperarla.
+    await page.waitForFunction((id) => location.hash === `#/conversacion/${id}` && /artículo contracto/.test(document.querySelector('#conv-errores')?.value || ''), created.id);
     assert.equal(await page.inputValue('#conv-rol'), 'un serveur dans un bistrot parisien');
-    await waitFor(() => fake.json().conversations.length === before + 1);
     assert.deepEqual(dev.errors, []);
     await dev.context.close();
   });
@@ -576,7 +590,7 @@ describe('Ayudas para estudiar', () => {
   test('Hoy: primeros pasos (y ocultarlos), siguiente paso, sugerencia y número de repasos', async () => {
     const fresh = await openDevice(null, 'iphone', { token: '' });
     await fresh.page.goto(`${server.url}/#/hoy`);
-    await fresh.page.getByRole('heading', { name: 'Primeros pasos (0 de 6)' }).waitFor();
+    await fresh.page.getByRole('heading', { name: 'Primeros pasos (0 de 7)' }).waitFor();
     await shot(fresh.page, 'iphone-primeros-pasos');
     await fresh.page.getByRole('button', { name: 'Ocultar esta lista' }).click();
     await fresh.page.reload();
@@ -674,12 +688,99 @@ describe('Ayudas para estudiar', () => {
   });
 });
 
+describe('Plan de estudio', () => {
+  test('Hoy muestra el próximo paso; la sesión trae la guía y al terminar el paso queda hecho', async () => {
+    const { data, ids } = withPlan(sampleData());
+    const fake = createFakeGitHub();
+    fake.setRemote(serialize(data));
+    const dev = await openDevice(fake, 'iphone');
+    const { page } = dev;
+    await page.goto(`${server.url}/#/hoy`);
+    await waitStatus(page, /^Guardado en GitHub/);
+    await page.getByRole('heading', { name: 'Tu plan de estudio' }).waitFor();
+    assert.match(await page.locator('main').innerText(), /Paso 1 de 3 · Édito B1 · Unidad 1 · p\. 12/);
+    assert.equal(await page.getByText('Sugerencia de objetivo').count(), 0, 'con plan, la sugerencia no hace falta');
+    await shot(page, 'iphone-hoy-plan');
+
+    await page.getByRole('link', { name: 'Empezar este paso' }).click();
+    await page.waitForSelector('#nueva-unidad');
+    assert.equal(await page.inputValue('#nueva-objetivo'), ids.o1);
+    assert.equal(await page.inputValue('#nueva-unidad'), '1');
+    assert.equal(await page.inputValue('#nueva-pagina'), '12');
+    assert.equal(await page.getByRole('button', { name: '15 min' }).getAttribute('aria-pressed'), 'true');
+    await page.getByRole('button', { name: 'Empezar', exact: true }).click();
+    await page.getByRole('heading', { name: 'Paso del plan' }).waitFor();
+    await page.getByText('Documento de prueba (p. 12).').click(); // marca la primera tarea
+    await waitFor(() => fake.json().sessions.some((x) => x.stepId === 'plan-test-01' && x.stepChecks.join() === '0'));
+    await shot(page, 'iphone-sesion-plan');
+    await page.getByRole('button', { name: 'Terminar sesión' }).click();
+    await waitFor(() => fake.json().steps.find((x) => x.id === 'plan-test-01').doneAt);
+    const session = fake.json().sessions.find((x) => x.stepId === 'plan-test-01');
+    assert.equal(fake.json().steps.find((x) => x.id === 'plan-test-01').sessionId, session.id);
+    await page.getByText('Paso 2 de 3').waitFor();
+    assert.match(await page.locator('main').innerText(), /Gramática de prueba/);
+
+    // El plan entero y un paso solo de conversación.
+    await go(page, '#/plan');
+    assert.match(await page.locator('main').innerText(), /1 de 3 pasos hechos/);
+    await shot(page, 'iphone-plan');
+    await go(page, '#/plan/plan-test-03');
+    assert.equal(await page.getByRole('link', { name: 'Empezar este paso' }).count(), 0);
+    await page.getByRole('button', { name: 'Preparar conversación' }).click();
+    await page.waitForSelector('#conv-rol');
+    assert.equal(await page.inputValue('#conv-rol'), 'un ami de la fac');
+    assert.equal(await page.inputValue('#conv-expr1'), 'À l’époque, on…');
+    await go(page, '#/plan/plan-test-03');
+    await page.getByRole('button', { name: 'Marcar como hecho' }).first().click();
+    await waitFor(() => fake.json().steps.find((x) => x.id === 'plan-test-03').doneAt);
+    assert.deepEqual(dev.errors, []);
+    await dev.context.close();
+  });
+
+  test('importar un plan con «Añadir lo nuevo» no borra nada y conserva lo hecho', async () => {
+    const { data } = withPlan(sampleData());
+    data.steps[0].doneAt = '2026-11-02T10:00:00.000Z';
+    const fake = createFakeGitHub();
+    fake.setRemote(serialize(data));
+    const dev = await openDevice(fake, 'mac');
+    const { page } = dev;
+    await page.goto(`${server.url}/#/ajustes`);
+    await waitStatus(page, /^Guardado en GitHub/);
+    const incoming = clone(data);
+    incoming.steps[0].doneAt = null;
+    incoming.steps[0].title = 'Escuchar y hablar (versión mejorada)';
+    incoming.steps.push({ ...incoming.steps[1], id: 'plan-test-04', order: 40, title: 'Paso nuevo' });
+    incoming.objectives.push({ ...incoming.objectives[0], id: 'obj-nuevo', title: 'Objetivo nuevo del plan' });
+    incoming.sessions = [];
+    const file = join(process.env.TMPDIR || '/tmp', `plan-${Date.now()}.json`);
+    writeFileSync(file, JSON.stringify(incoming));
+    await page.setInputFiles('#ajustes-importar', file);
+    await page.getByRole('heading', { name: 'Importar JSON' }).waitFor();
+    const summary = await page.locator('.summary-table').innerText();
+    assert.match(summary, /Plan de estudio\s+3\s+4\s+1/);
+    assert.match(summary, /Objetivos\s+4\s+5\s+1/);
+    assert.match(await page.locator('dialog').innerText(), /actualiza 1 del plan/);
+    await shot(page, 'mac-importar-plan');
+    await page.getByRole('button', { name: 'Añadir lo nuevo' }).click();
+    await waitFor(() => fake.json().steps.length === 4);
+    const remote = fake.json();
+    assert.equal(remote.sessions.length, data.sessions.length, 'no se borran las sesiones');
+    assert.equal(remote.objectives.length, 5);
+    const first = remote.steps.find((x) => x.id === 'plan-test-01');
+    assert.equal(first.title, 'Escuchar y hablar (versión mejorada)');
+    assert.equal(first.doneAt, '2026-11-02T10:00:00.000Z', 'lo hecho se conserva');
+    assert.match(fake.commits.at(-1).message, /^Añadir desde JSON/);
+    assert.deepEqual(dev.errors, []);
+    await dev.context.close();
+  });
+});
+
 describe('Pantallas de iPhone, iPad y Mac', () => {
-  const ROUTES = (ids) => ['#/hoy', '#/sesion/nueva', `#/sesion/${ids.s1}`, '#/sesiones', '#/conversacion', `#/conversacion/${ids.c1}`, '#/biblioteca', '#/objetivos', `#/objetivos/${ids.o1}`, '#/repaso', '#/repaso/practicar', '#/repaso/tarjetas', '#/progreso', '#/ajustes', '#/ayuda', '#/mas'];
+  const ROUTES = (ids) => ['#/hoy', '#/plan', '#/plan/plan-test-01', '#/sesion/nueva/paso/plan-test-01', '#/sesion/nueva', `#/sesion/${ids.s1}`, '#/sesiones', '#/conversacion', `#/conversacion/${ids.c1}`, '#/biblioteca', '#/objetivos', `#/objetivos/${ids.o1}`, '#/repaso', '#/repaso/practicar', '#/repaso/tarjetas', '#/progreso', '#/ajustes', '#/ayuda', '#/mas'];
 
   for (const kind of Object.keys(DEVICES)) {
     test(`${kind}: sin desbordes, indicador y navegación siempre visibles, botones grandes`, async () => {
-      const { data, ids } = sampleData();
+      const { data, ids } = withPlan(sampleData());
       const fake = createFakeGitHub();
       fake.setRemote(serialize(data));
       const dev = await openDevice(fake, kind, { fixedTime: '2026-10-28T19:00:00Z' });

@@ -21,9 +21,11 @@ import * as Progreso from './views/progreso.js';
 import * as Ajustes from './views/ajustes.js';
 import * as Mas from './views/mas.js';
 import * as Ayuda from './views/ayuda.js';
+import * as Plan from './views/plan.js';
 
 const ROUTES = {
   hoy: { view: Hoy.render, title: 'Hoy' },
+  plan: { view: Plan.render, title: 'Plan' },
   sesion: { view: Sesion.render, title: 'Sesión' },
   sesiones: { view: Sesion.renderList, title: 'Sesiones', nav: 'sesion' },
   conversacion: { view: Conversacion.render, title: 'Conversación' },
@@ -40,6 +42,7 @@ const ROUTES = {
 // las demás están dentro de «Más».
 const NAV = [
   { id: 'hoy', label: 'Hoy', icon: 'hoy', phone: true },
+  { id: 'plan', label: 'Plan', icon: 'plan' },
   { id: 'sesion', label: 'Sesión', icon: 'sesion', phone: true },
   { id: 'conversacion', label: 'Conversación', short: 'Conversar', icon: 'chat', phone: true },
   { id: 'repaso', label: 'Repaso', icon: 'repaso', phone: true },
@@ -50,7 +53,7 @@ const NAV = [
   { id: 'ayuda', label: 'Ayuda', icon: 'ayuda' },
   { id: 'mas', label: 'Más', icon: 'mas', phone: true, phoneOnly: true },
 ];
-const IN_MORE = new Set(['biblioteca', 'objetivos', 'progreso', 'ajustes', 'mas', 'ayuda']);
+const IN_MORE = new Set(['plan', 'biblioteca', 'objetivos', 'progreso', 'ajustes', 'mas', 'ayuda']);
 
 const api = createGitHubApi({ getToken: () => local.get('token') || '', getRepo: () => local.get('repo') || DEFAULT_REPO });
 const sync = new SyncEngine({ api, storage: browserStorage, isOnline: () => navigator.onLine !== false, deviceName });
