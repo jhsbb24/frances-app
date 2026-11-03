@@ -50,7 +50,12 @@ function firstSteps(ctx) {
 export function render(main, ctx) {
   const data = ctx.sync.data;
   const t = today();
-  main.append(h('h1', { text: 'Hoy' }), h('p', { class: 'subtitle', text: capitalize(formatDay(t)) }));
+  const hour = new Date().getHours();
+  main.append(
+    h('p', { class: 'eyebrow', lang: 'fr', text: hour < 5 || hour >= 18 ? 'Bonsoir' : 'Bonjour' }),
+    h('h1', { text: 'Hoy' }),
+    h('p', { class: 'subtitle', text: capitalize(formatDay(t)) }),
+  );
   // En el Mac: a la izquierda el plan y la sesión; a la derecha repasos y
   // conversación. En el iPhone, todo en una columna, en ese orden.
   const primary = h('div', { class: 'pane-main' });

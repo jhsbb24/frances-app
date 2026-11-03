@@ -4,7 +4,7 @@
 // cambiar algo básico (por ejemplo, la zona horaria), es aquí.
 // ─────────────────────────────────────────────────────────────
 
-export const APP_VERSION = '1.1.0';
+export const APP_VERSION = '1.2.0';
 
 // Repositorio PRIVADO donde se guardan tus datos (se puede cambiar en Ajustes).
 export const DEFAULT_REPO = 'jhsbb24/frances-datos';

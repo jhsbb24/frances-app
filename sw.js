@@ -5,7 +5,7 @@
 // versión más nueva; si no, usa la copia guardada.
 // NUNCA toca las peticiones a GitHub (api.github.com).
 // ─────────────────────────────────────────────────────────────
-const CACHE = 'mi-frances-v4';
+const CACHE = 'mi-frances-v5';
 
 const APP_FILES = [
   './',

@@ -97,16 +97,24 @@ export function nextStepCard(ctx, { title = 'Tu próximo paso' } = {}) {
   if (!next) {
     return section(title, h('p', { text: `¡Terminaste los ${steps.length} pasos del plan!` }), linkButton('Ver el plan', '#/plan', 'secondary'));
   }
-  return section(
+  const pct = steps.length ? Math.round((done / steps.length) * 100) : 0;
+  const fill = h('span', { class: 'bar-fill status-autonomo' });
+  fill.style.width = `${pct}%`;
+  const card = section(
     title,
     h('p', { class: 'item-meta', text: `Paso ${done + 1} de ${steps.length} · ${stepLabel(next)}${next.unitTitle ? ` · ${next.unitTitle}` : ''}` }),
-    h('p', { class: 'item-title', text: next.title }),
-    h('ul', { class: 'plain-list compact' }, next.instructions.slice(0, 3).map((t) => h('li', {}, h('strong', { text: `${stepType(t.type).label}: ` }), t.text))),
+    h('p', { class: 'item-title hero-title', text: next.title }),
+    h('ul', { class: 'task-preview' }, next.instructions.slice(0, 3).map((t) => h('li', {}, h('span', { class: `task-type type-${t.type}`, text: stepType(t.type).label }), ' ', t.text))),
     next.instructions.length > 3 ? h('p', { class: 'hint', text: `y ${next.instructions.length - 3} tareas más…` }) : null,
     audioNote(next),
     stepActions(ctx, next),
-    h('a', { class: 'link', href: `#/plan/${next.id}`, text: 'Ver el paso completo' }),
+    h('div', { class: 'hero-foot' },
+      h('a', { class: 'link', href: `#/plan/${next.id}`, text: 'Ver el paso completo' }),
+      h('span', { class: 'hero-progress', title: `${done} de ${steps.length} pasos hechos` }, h('span', { class: 'bar', 'aria-hidden': 'true' }, fill), h('small', { text: `${pct} % del plan` })),
+    ),
   );
+  card.classList.add('hero');
+  return card;
 }
 
 export function render(main, ctx, params) {
