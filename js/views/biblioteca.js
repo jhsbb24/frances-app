@@ -5,73 +5,136 @@ import { BOOKS } from '../config.js';
 import { h, chips, groupLabel, textField, empty, button, linkButton, toast, confirmDialog, openDialog, externalLink } from '../dom.js';
 import { formatShort } from '../dates.js';
 import { referenceUsage } from '../insights.js';
-import { newReference, refText, safeUrl, nowIso } from '../model.js';
+import { newReference, refText, safeUrl, nowIso, nextStep } from '../model.js';
 import { plain } from '../registro.js';
 import { short } from '../components.js';
 
-const filters = { text: '', book: '' }; // se recuerdan mientras la app está abierta
+const filters = { text: '', book: '', kind: '' }; // se recuerdan mientras la app está abierta
+const openUnits = new Set(); // unidades abiertas (la primera vez: la del paso actual del plan)
+let touched = false;
+
+/** Tipo de ficha, según el comienzo de la nota («Audio: …», «Gramática: …»). */
+const KINDS = ['Gramática', 'Vocabulario', 'Fonética', 'Audio', 'Vídeo'];
+export const refKind = (r) => KINDS.find((k) => r.notes.startsWith(`${k}:`)) || '';
+const KIND_CHIPS = [
+  { value: '', label: 'Todo' },
+  { value: 'Gramática', label: 'Gramática' },
+  { value: 'Vocabulario', label: 'Vocabulario' },
+  { value: 'Fonética', label: 'Fonética' },
+  { value: 'Audio', label: 'Audios' },
+  { value: 'Vídeo', label: 'Vídeos' },
+  { value: 'mias', label: 'Mis notas' },
+];
+
+const unitKey = (r) => `${r.book}·${r.unit || '—'}`;
+const byNumber = (a, b) => String(a).localeCompare(String(b), 'es', { numeric: true });
 
 export function render(main, ctx) {
   const list = h('div', { class: 'list' });
-  const search = h('input', { type: 'search', id: 'biblioteca-buscar', placeholder: 'Buscar: unidad, página, nota…', autocomplete: 'off', 'aria-label': 'Buscar en la Biblioteca' });
+  const count = h('p', { class: 'hint', 'aria-live': 'polite' });
+  const search = h('input', { type: 'search', id: 'biblioteca-buscar', placeholder: 'Buscar: «subjonctif», «p. 44», «audio unidad 3»…', autocomplete: 'off', 'aria-label': 'Buscar en la Biblioteca' });
   search.value = filters.text;
   search.addEventListener('input', () => {
     filters.text = search.value;
     paint();
   });
 
+  // Títulos de las unidades (vienen del plan) y la unidad en la que vas.
+  const data = ctx.sync.data;
+  const unitTitles = new Map(data.steps.map((st) => [`${st.book}·${st.unit}`, st.unitTitle]));
+  const next = nextStep(data);
+  if (!touched && next) openUnits.add(`${next.book}·${next.unit}`);
+
+  const row = (r) => {
+    const use = referenceUsage(ctx.sync.data, r);
+    const used = use.sessions + use.conversations;
+    const usage = used
+      ? `Usada en ${[use.sessions && `${use.sessions} ${use.sessions === 1 ? 'sesión' : 'sesiones'}`, use.conversations && `${use.conversations} ${use.conversations === 1 ? 'conversación' : 'conversaciones'}`].filter(Boolean).join(' y ')} · última: ${formatShort(use.last)}`
+      : '';
+    const kind = refKind(r);
+    const text = kind ? r.notes.slice(kind.length + 1).trim() : r.notes;
+    return h('article', { class: 'ref-row' },
+      h('div', { class: 'item-main' },
+        h('p', { class: 'item-title' }, r.page ? `p. ${r.page}` : 'Sin página', kind ? h('span', { class: `badge kind-${plain(kind)}`, text: kind }) : null),
+        text ? h('p', { class: 'pre item-text', text }) : null,
+        usage ? h('p', { class: 'item-meta', text: usage }) : null,
+      ),
+      h('div', { class: 'row-actions' },
+        r.audioUrl ? externalLink('Audio', r.audioUrl, 'btn secondary small') : null,
+        linkButton('Empezar sesión', `#/sesion/nueva/referencia/${r.id}`, 'secondary small'),
+        button('Editar', () => openReferenceDialog(ctx, r.id, paint), 'secondary small'),
+      ),
+    );
+  };
+
   const paint = () => {
+    const all = ctx.sync.data.references;
     const words = plain(filters.text).split(/\s+/).filter(Boolean);
-    const refs = ctx.sync.data.references
+    const refs = all
       .filter((r) => !filters.book || r.book === filters.book)
+      .filter((r) => !filters.kind || (filters.kind === 'mias' ? !refKind(r) : refKind(r) === filters.kind))
       .filter((r) => {
-        const haystack = plain([`edito ${r.book}`, r.edition, `unidad ${r.unit}`, `u${r.unit}`, `p. ${r.page}`, `pagina ${r.page}`, r.notes, r.audioUrl].join(' '));
+        const haystack = plain([`edito ${r.book}`, r.edition, `unidad ${r.unit}`, `u${r.unit}`, `p. ${r.page}`, `p ${r.page}`, `pagina ${r.page}`, r.notes, r.audioUrl, unitTitles.get(unitKey(r))].join(' '));
         return words.every((w) => haystack.includes(w));
-      })
-      .sort((a, b) => refText(a).localeCompare(refText(b), 'es', { numeric: true }));
+      });
     list.replaceChildren();
-    if (!ctx.sync.data.references.length) {
-      list.append(empty('Todavía no tienes referencias. Añade la primera con el botón de arriba.'));
+    count.textContent = all.length ? `${refs.length === all.length ? `${all.length} fichas` : `${refs.length} de ${all.length} fichas`}.` : '';
+    if (!all.length) {
+      list.append(empty('Todavía no tienes referencias. Añade la primera con el botón de arriba (o carga el plan de estudio).'));
       return;
     }
     if (!refs.length) {
-      list.append(empty('Nada coincide con la búsqueda.'));
+      list.append(empty('Nada coincide con la búsqueda o el filtro.'));
       return;
     }
+    // Agrupadas por libro y unidad; dentro, por página.
+    const groups = new Map();
     for (const r of refs) {
-      const use = referenceUsage(ctx.sync.data, r);
-      const used = use.sessions + use.conversations;
-      const usage = used
-        ? `Usada en ${[use.sessions && `${use.sessions} ${use.sessions === 1 ? 'sesión' : 'sesiones'}`, use.conversations && `${use.conversations} ${use.conversations === 1 ? 'conversación' : 'conversaciones'}`].filter(Boolean).join(' y ')} · última: ${formatShort(use.last)}`
-        : 'Todavía sin usar';
-      list.append(
-        h('article', { class: 'card ref-card' },
-          h('div', { class: 'item-main' },
-            h('p', { class: 'item-title', text: [`Édito ${r.book}`, r.unit && `Unidad ${r.unit}`, r.page && `p. ${r.page}`].filter(Boolean).join(' · ') }),
-            h('p', { class: 'item-meta', text: [r.edition && `Edición: ${r.edition}`, usage].filter(Boolean).join(' · ') }),
-            r.notes ? h('p', { class: 'pre item-text', text: r.notes }) : null,
-          ),
-          h('div', { class: 'row-actions' },
-            r.audioUrl ? externalLink('Audio', r.audioUrl, 'btn secondary small') : null,
-            linkButton('Empezar sesión', `#/sesion/nueva/referencia/${r.id}`, 'secondary small'),
-            button('Editar', () => openReferenceDialog(ctx, r.id, paint), 'secondary small'),
-          ),
+      const key = unitKey(r);
+      if (!groups.has(key)) groups.set(key, { key, book: r.book, unit: r.unit, refs: [] });
+      groups.get(key).refs.push(r);
+    }
+    const filtering = words.length > 0 || Boolean(filters.kind);
+    const ordered = [...groups.values()].sort((a, b) => byNumber(a.book, b.book) || byNumber(a.unit || '999', b.unit || '999'));
+    for (const g of ordered) {
+      g.refs.sort((a, b) => byNumber(a.page || '999', b.page || '999') || a.notes.localeCompare(b.notes, 'es'));
+      const title = unitTitles.get(g.key);
+      // Abiertas: al buscar o filtrar, la unidad en la que vas del plan, o todas si son pocas fichas.
+      const details = h('details', { class: 'card unit', open: filtering || openUnits.has(g.key) || ordered.length === 1 || all.length <= 20 || (!next && !touched) },
+        h('summary', {},
+          h('span', { class: 'summary-title', text: `Édito ${g.book} · ${g.unit ? `Unidad ${g.unit}` : 'Sin unidad'}${title ? ` — ${title}` : ''}` }),
+          h('span', { class: 'summary-meta', text: `${g.refs.length} ${g.refs.length === 1 ? 'ficha' : 'fichas'}` }),
         ),
+        ...g.refs.map(row),
       );
+      details.addEventListener('toggle', () => {
+        if (filtering) return; // abrir y cerrar mientras buscas no cambia lo que recuerdas
+        touched = true;
+        if (details.open) openUnits.add(g.key);
+        else openUnits.delete(g.key);
+      });
+      list.append(details);
     }
   };
 
   main.append(
     h('h1', { text: 'Biblioteca' }),
-    h('p', { class: 'subtitle', text: 'Tus referencias de Édito B1 y B2.' }),
+    h('p', { class: 'subtitle', text: 'Tus referencias de Édito: gramática, vocabulario, fonética, audios y vídeos de cada unidad.' }),
     button('Nueva referencia', () => openReferenceDialog(ctx, '', paint), 'primary block'),
     h('div', { class: 'toolbar' },
       search,
-      chips([{ value: '', label: 'Todas' }, ...BOOKS.map((b) => ({ value: b, label: b }))], filters.book, (v) => {
-        filters.book = v;
+      chips(KIND_CHIPS, filters.kind, (v) => {
+        filters.kind = v;
         paint();
-      }, { label: 'Filtrar por libro' }),
+      }, { label: 'Filtrar por tipo' }),
+      BOOKS.some((b) => b !== 'B1' && data.references.some((r) => r.book === b))
+        ? chips([{ value: '', label: 'B1 y B2' }, ...BOOKS.map((b) => ({ value: b, label: `Solo ${b}` }))], filters.book, (v) => {
+          filters.book = v;
+          paint();
+        }, { label: 'Filtrar por libro' })
+        : null,
     ),
+    count,
     list,
   );
   paint();

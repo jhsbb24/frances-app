@@ -65,7 +65,7 @@ export function weekStart(key) {
 /** Recuento por semana (de lunes a domingo, hora de Vancouver), de la más reciente a la más antigua. */
 export function weeklyActivity(data, todayKey, weeks = 8) {
   const first = weekStart(todayKey);
-  const rows = Array.from({ length: weeks }, (_, i) => ({ start: addDays(first, -7 * i), sessions: 0, conversations: 0, reviews: 0 }));
+  const rows = Array.from({ length: weeks }, (_, i) => ({ start: addDays(first, -7 * i), sessions: 0, conversations: 0, reviews: 0, steps: 0 }));
   const add = (day, field) => {
     const row = rows.find((r) => r.start === weekStart(day));
     if (row) row[field] += 1;
@@ -73,7 +73,32 @@ export function weeklyActivity(data, todayKey, weeks = 8) {
   for (const s of data.sessions) add(dayKey(new Date(s.createdAt)), 'sessions');
   for (const c of data.conversations) if (c.registro.trim()) add(dayKey(new Date(c.registroAt || c.createdAt)), 'conversations');
   for (const card of data.cards) for (const r of card.reviews || []) if (r.day) add(r.day, 'reviews');
+  for (const step of data.steps || []) if (step.doneAt) add(dayKey(new Date(step.doneAt)), 'steps');
   return rows;
+}
+
+/**
+ * Avance en el plan de estudio: total, hechos, por unidad y ritmo de las
+ * últimas 4 semanas. Mide el plan, no el nivel.
+ */
+export function planProgress(data, todayKey) {
+  const steps = [...(data.steps || [])].sort((a, b) => a.order - b.order);
+  const units = [];
+  for (const step of steps) {
+    const key = `${step.book}·${step.unit}`;
+    let u = units[units.length - 1];
+    if (!u || u.key !== key) units.push((u = { key, book: step.book, unit: step.unit, title: step.unitTitle, total: 0, done: 0 }));
+    u.total += 1;
+    if (step.doneAt) u.done += 1;
+  }
+  const done = steps.filter((x) => x.doneAt).length;
+  // Ritmo: pasos de las últimas 4 semanas, divididos por las semanas que
+  // de verdad llevas estudiando (si empezaste hace 10 días, son 2, no 4).
+  const ages = steps.filter((x) => x.doneAt).map((x) => diffDays(dayKey(new Date(x.doneAt)), todayKey)).filter((d) => d >= 0 && d < 28);
+  const weeks = ages.length ? Math.min(4, Math.max(1, Math.ceil((Math.max(...ages) + 1) / 7))) : 4;
+  const perWeek = Math.round((ages.length / weeks) * 10) / 10;
+  const left = steps.length - done;
+  return { total: steps.length, done, left, units, perWeek, weeksLeft: perWeek > 0 && left > 0 ? Math.ceil(left / perWeek) : null };
 }
 
 /** Unidades de Édito que aparecen en tus sesiones y conversaciones, por libro. */

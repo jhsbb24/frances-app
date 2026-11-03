@@ -1,7 +1,7 @@
 // Pantalla «Objetivos»: cada objetivo tiene una habilidad y un
 // estado. Cambiar de estado pide un motivo y queda en el historial.
 import { SKILLS, STATUSES, statusLabel, statusHelp } from '../config.js';
-import { h, chips, groupLabel, textField, section, empty, button, linkButton, toast, confirmDialog, openDialog } from '../dom.js';
+import { h, chips, groupLabel, textField, section, empty, button, linkButton, toast, confirmDialog, openDialog, select, labeled } from '../dom.js';
 import { formatShort, formatDateTime, today, dayKey, relativeDay } from '../dates.js';
 import { newObjective, nowIso } from '../model.js';
 import { lastActivity, practiceCounts } from '../insights.js';
@@ -19,7 +19,11 @@ function practiceSummary(data, objectiveId) {
   return parts.join(' · ');
 }
 
-const filters = { skill: '' };
+const filters = { skill: '', unit: '' };
+
+/** Unidad de un objetivo del plan («U3 · …» o id obj-b1-u03-…); '' si no tiene. */
+export const objectiveUnit = (o) => o.id.match(/^obj-[a-z0-9]+-u0*(\d+)-/i)?.[1] || o.title.match(/^U(\d+)\s*·/)?.[1] || '';
+const byTitle = (a, b) => (a.title || '').localeCompare(b.title || '', 'es', { numeric: true });
 
 export function render(main, ctx, params) {
   const [id] = params;
@@ -35,13 +39,13 @@ function renderList(main, ctx) {
   const groups = h('div', {});
   const paint = () => {
     groups.replaceChildren();
-    const objectives = data.objectives.filter((o) => !filters.skill || o.skill === filters.skill);
+    const objectives = data.objectives.filter((o) => (!filters.skill || o.skill === filters.skill) && (!filters.unit || objectiveUnit(o) === (filters.unit === 'sin' ? '' : filters.unit)));
     if (!data.objectives.length) {
       groups.append(empty('Todavía no tienes objetivos. Crea el primero con el botón de arriba.'));
       return;
     }
     for (const st of STATUSES) {
-      const items = objectives.filter((o) => o.status === st.id).sort((a, b) => a.title.localeCompare(b.title, 'es'));
+      const items = objectives.filter((o) => o.status === st.id).sort(byTitle);
       if (!items.length) continue;
       groups.append(
         section(`${st.label} (${items.length})`,
@@ -57,12 +61,22 @@ function renderList(main, ctx) {
         ),
       );
     }
-    if (!groups.children.length) groups.append(empty('No hay objetivos con esta habilidad.'));
+    if (!groups.children.length) groups.append(empty('No hay objetivos con estos filtros.'));
   };
+  // Filtro por unidad (solo si hay objetivos del plan).
+  const units = [...new Set(data.objectives.map(objectiveUnit).filter(Boolean))].sort((a, b) => a - b);
+  if (filters.unit && filters.unit !== 'sin' && !units.includes(filters.unit)) filters.unit = '';
+  const unitFilter = units.length
+    ? labeled('Unidad', select([
+      { value: '', label: 'Todas las unidades' },
+      ...units.map((u) => ({ value: u, label: `Unidad ${u}` })),
+      ...(data.objectives.some((o) => !objectiveUnit(o)) ? [{ value: 'sin', label: 'Mis objetivos (sin unidad)' }] : []),
+    ], filters.unit, (v) => ((filters.unit = v), paint()), { id: 'objetivos-unidad' }))
+    : null;
   main.append(
     h('h1', { text: 'Objetivos' }),
     button('Nuevo objetivo', () => openNewObjectiveDialog(ctx, (o) => ctx.go(`#/objetivos/${o.id}`)), 'primary block'),
-    h('div', { class: 'toolbar' }, chips([{ value: '', label: 'Todas' }, ...SKILLS.map((s) => ({ value: s.id, label: s.label }))], filters.skill, (v) => ((filters.skill = v), paint()), { label: 'Filtrar por habilidad' })),
+    h('div', { class: 'toolbar' }, chips([{ value: '', label: 'Todas' }, ...SKILLS.map((s) => ({ value: s.id, label: s.label }))], filters.skill, (v) => ((filters.skill = v), paint()), { label: 'Filtrar por habilidad' }), unitFilter),
     groups,
   );
   paint();

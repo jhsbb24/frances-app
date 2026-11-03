@@ -19,7 +19,9 @@ export function render(main) {
         'Trabaja con el libro abierto y escribe tus intentos en la app. Cada tarea tiene un método («Cómo trabajar cada tarea»).',
         'Al pulsar «Terminar sesión», el paso queda hecho y el plan pasa al siguiente. Si no terminas, «Pausar y salir» y sigues otro día.',
         'Algunos pasos son de conversación: «Preparar conversación» trae el rol y las expresiones listos para ChatGPT Voice.',
-        'El plan completo está en Más → Plan de estudio. Se carga con Ajustes → Importar JSON → «Añadir lo nuevo».',
+        'En el Mac, la sesión se ve en dos columnas: el cronómetro y las tareas quedan fijos a la izquierda mientras escribes a la derecha. El tiempo que queda también se ve en el título de la ventana.',
+        'El plan completo está en Plan (en el iPhone: Más → Plan de estudio). Se carga con Ajustes → Importar JSON → «Añadir lo nuevo». En Progreso ves cuántos pasos llevas de cada unidad.',
+        'La Biblioteca agrupa las fichas por unidad (gramática, vocabulario, fonética, audios y vídeos) y se puede filtrar por tipo.',
       ], true),
     ),
 

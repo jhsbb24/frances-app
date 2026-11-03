@@ -65,7 +65,7 @@ export function createGitHubApi({ getToken, getRepo, fetchFn = (...args) => fetc
     return repo;
   }
 
-  async function request(method, path, body) {
+  async function request(method, path, body, { ifNoneMatch = '', withEtag = false } = {}) {
     const token = getToken();
     if (!token) throw new GitHubError('auth', 'Falta el token de GitHub. Ponlo en Ajustes.');
     const controller = typeof AbortController === 'function' ? new AbortController() : null;
@@ -79,6 +79,8 @@ export function createGitHubApi({ getToken, getRepo, fetchFn = (...args) => fetc
           Authorization: `Bearer ${token}`,
           'X-GitHub-Api-Version': '2022-11-28',
           ...(body ? { 'Content-Type': 'application/json' } : {}),
+          // «¿Ha cambiado desde la última vez?» Si no, GitHub responde 304 sin datos.
+          ...(ifNoneMatch ? { 'If-None-Match': ifNoneMatch } : {}),
         },
         body: body ? JSON.stringify(body) : undefined,
         cache: 'no-store', // nunca usar una copia vieja guardada por el navegador
@@ -91,7 +93,11 @@ export function createGitHubApi({ getToken, getRepo, fetchFn = (...args) => fetc
     } finally {
       if (timer) clearTimeout(timer);
     }
-    if (res.ok) return res.status === 204 ? null : res.json();
+    if (res.status === 304) return { notModified: true };
+    if (res.ok) {
+      const json = res.status === 204 ? null : await res.json();
+      return withEtag ? { json, etag: res.headers.get('etag') || '' } : json;
+    }
 
     let message = '';
     try {
@@ -118,21 +124,47 @@ export function createGitHubApi({ getToken, getRepo, fetchFn = (...args) => fetc
     return `/repos/${owner}/${repo}/contents/${DATA_PATH}`;
   };
 
+  // Última lectura: si GitHub dice que el archivo no ha cambiado (304),
+  // no hace falta volver a descargarlo entero (con el plan, son cientos de KB).
+  let last = null; // { path, etag, result }
+
+  /** GET del archivo, preguntando antes si cambió. */
+  async function getContents() {
+    const path = contentsPath();
+    const cached = last && last.path === path ? last : null;
+    if (cached) {
+      try {
+        const res = await request('GET', path, undefined, { ifNoneMatch: cached.etag, withEtag: true });
+        if (res.notModified) return { unchanged: cached.result };
+        return res;
+      } catch (err) {
+        if (['auth', 'notfound', 'ratelimit'].includes(err.kind)) throw err;
+        // Por si algún navegador no admite la pregunta: se pide entero.
+      }
+    }
+    const res = await request('GET', path, undefined, { withEtag: true });
+    if (res.notModified) throw new GitHubError('other', 'GitHub respondió «sin cambios» sin haber datos anteriores.');
+    return res;
+  }
+
   return {
     isConfigured: () => Boolean(getToken()) && Boolean(parseRepo(getRepo())),
 
     /** Devuelve { sha, text } o null si data.json todavía no existe. */
     async readFile() {
-      let json;
+      let res;
       try {
-        json = await request('GET', contentsPath());
+        res = await getContents();
       } catch (err) {
+        last = null;
         if (err.kind !== 'notfound') throw err;
         // ¿Falta el archivo o falta el repositorio?
         const { owner, repo } = target();
         await request('GET', `/repos/${owner}/${repo}`); // lanza 'notfound' si no hay acceso
         return null;
       }
+      if (res.unchanged) return { ...res.unchanged };
+      const json = res.json;
       if (!json || Array.isArray(json) || json.type !== 'file') {
         throw new GitHubError('other', `«${DATA_PATH}» no es un archivo en el repositorio.`);
       }
@@ -145,7 +177,9 @@ export function createGitHubApi({ getToken, getRepo, fetchFn = (...args) => fetc
         const blob = await request('GET', `/repos/${owner}/${repo}/git/blobs/${json.sha}`);
         text = decodeBase64(blob.content);
       }
-      return { sha: json.sha, text };
+      const result = { sha: json.sha, text };
+      last = res.etag ? { path: contentsPath(), etag: res.etag, result } : null;
+      return { ...result };
     },
 
     /** Guarda el texto como un commit. `sha` = versión que reemplazamos (null si es nuevo). */

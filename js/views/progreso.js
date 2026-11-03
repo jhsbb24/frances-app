@@ -3,13 +3,14 @@
 import { SKILLS, STATUSES, statusLabel } from '../config.js';
 import { h, chips, section, empty } from '../dom.js';
 import { formatShort, formatDay, today } from '../dates.js';
-import { weeklyActivity, unitsWorked, recentDifficulties } from '../insights.js';
+import { weeklyActivity, unitsWorked, recentDifficulties, planProgress } from '../insights.js';
 import { parseRegistro } from '../registro.js';
 import { skillBadge, clip } from '../components.js';
 
 const filters = { skill: '' };
 
 const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+const BOOK_SHORT = (book) => (book && book !== 'B1' ? `${book} · ` : '');
 
 export function collectEvidence(data) {
   const out = [];
@@ -46,6 +47,36 @@ export function render(main, ctx) {
   const paint = () => {
     content.replaceChildren();
     const skills = SKILLS.filter((s) => !filters.skill || s.id === filters.skill);
+
+    // Plan de estudio: pasos hechos por unidad y ritmo (no depende del filtro)
+    if (data.steps.length) {
+      const p = planProgress(data, today());
+      const pct = Math.round((p.done / p.total) * 100);
+      const bar = (done, total) => {
+        const fill = h('span', { class: 'bar-fill status-autonomo' });
+        fill.style.width = `${total ? Math.round((done / total) * 100) : 0}%`;
+        return h('span', { class: 'bar', role: 'img', 'aria-label': `${done} de ${total}` }, fill);
+      };
+      const pace = p.perWeek
+        ? `Ritmo de las últimas 4 semanas: ${String(p.perWeek).replace('.', ',')} pasos por semana.${p.weeksLeft ? ` A este ritmo, te quedan unas ${p.weeksLeft} semanas.` : ''}`
+        : 'Cuando termines pasos, aquí verás tu ritmo semanal.';
+      content.append(
+        section(
+          'Plan de estudio',
+          h('p', { class: 'big-number' }, h('strong', { text: `${pct} %` }), ` · ${p.done} de ${p.total} pasos hechos`),
+          h('p', { class: 'hint', text: `${pace} Esto mide el plan, no tu nivel.` }),
+          h('div', { class: 'unit-bars' },
+            p.units.map((u) =>
+              h('a', { class: `bar-row unit-row${u.done === u.total ? ' complete' : ''}`, href: '#/plan', title: u.title || '' },
+                h('span', { class: 'bar-label', text: `${BOOK_SHORT(u.book)}Unidad ${u.unit}` }),
+                bar(u.done, u.total),
+                h('span', { class: 'bar-count', text: `${u.done}/${u.total}` }),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
 
     // Objetivos por habilidad y estado
     const grid = h('div', { class: 'skill-grid' });
@@ -128,7 +159,7 @@ export function render(main, ctx) {
         h('p', { class: 'hint', text: 'Recuento de lunes a domingo (todas las habilidades). Sirve para ver tu ritmo, no mide tu nivel.' }),
         h('ul', { class: 'plain-list' },
           weeks.map((w, i) =>
-            h('li', {}, h('strong', { text: i === 0 ? 'Esta semana' : `Semana del ${formatDay(w.start, { weekday: false })}` }), `: ${count(w.sessions, 'sesión', 'sesiones')} · ${count(w.conversations, 'conversación', 'conversaciones')} · ${count(w.reviews, 'repaso', 'repasos')}`),
+            h('li', {}, h('strong', { text: i === 0 ? 'Esta semana' : `Semana del ${formatDay(w.start, { weekday: false })}` }), `: ${data.steps.length ? `${count(w.steps, 'paso del plan', 'pasos del plan')} · ` : ''}${count(w.sessions, 'sesión', 'sesiones')} · ${count(w.conversations, 'conversación', 'conversaciones')} · ${count(w.reviews, 'repaso', 'repasos')}`),
           ),
         ),
       ),

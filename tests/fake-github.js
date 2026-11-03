@@ -19,7 +19,7 @@ const CORS = {
   'access-control-allow-origin': '*',
   'access-control-allow-headers': 'authorization, content-type, x-github-api-version, accept',
   'access-control-allow-methods': 'GET, PUT, OPTIONS',
-  'access-control-expose-headers': 'x-ratelimit-remaining, retry-after',
+  'access-control-expose-headers': 'etag, x-ratelimit-remaining, retry-after',
 };
 
 export function createFakeGitHub({ token = TOKEN, repo = REPO, path = 'data.json' } = {}) {
@@ -32,6 +32,8 @@ export function createFakeGitHub({ token = TOKEN, repo = REPO, path = 'data.json
     serveStaleOnce: false,
     puts: 0,
     gets: 0,
+    notModified: 0, // respuestas 304 («no ha cambiado»)
+    etags: true, // como GitHub: ETag en cada lectura
 
     /** Otro dispositivo guarda una versión distinta. */
     setRemote(text, message = 'Cambio desde otro dispositivo') {
@@ -70,8 +72,15 @@ export function createFakeGitHub({ token = TOKEN, repo = REPO, path = 'data.json
           gh.serveStaleOnce = false;
           file = gh.commits[gh.commits.length - 2];
         }
+        const etag = `W/"${file.sha}"`;
+        if (gh.etags && headers['if-none-match'] === etag) {
+          gh.notModified += 1;
+          return { status: 304, headers: { ...CORS, etag }, body: '' };
+        }
         const b64 = Buffer.from(file.text, 'utf8').toString('base64').replace(/(.{60})/g, '$1\n');
-        return reply(200, { type: 'file', name: path, path, sha: file.sha, size: file.text.length, encoding: 'base64', content: b64 });
+        const res = reply(200, { type: 'file', name: path, path, sha: file.sha, size: file.text.length, encoding: 'base64', content: b64 });
+        if (gh.etags) res.headers.etag = etag;
+        return res;
       }
       if (method === 'PUT' && u.pathname === contentsPath) {
         const data = JSON.parse(body || '{}');

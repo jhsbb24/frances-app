@@ -155,6 +155,11 @@ function renderSession(main, ctx, id) {
     h('p', { class: 'subtitle', text: `${formatShort(s.createdAt)} · ${s.minutes} minutos` }),
   );
 
+  // En el Mac (pantalla ancha): a la izquierda, fijos, el cronómetro y las
+  // tareas del paso; a la derecha, tu trabajo. En el iPhone, una columna.
+  const side = h('div', { class: 'pane-side' });
+  const work = h('div', { class: 'pane-main' });
+
   // Cronómetro y plan sugerido
   let interval = null;
   if (!s.closedAt) {
@@ -188,16 +193,18 @@ function renderSession(main, ctx, id) {
         li.classList.toggle('current', i === phase.index);
       });
       phaseText.textContent = phase.name ? `Plan sugerido · ahora: ${phase.name.toLowerCase()} (hasta el minuto ${phase.endsAt}).` : 'Plan sugerido completado.';
+      // El tiempo también en el título de la ventana (se ve en la pestaña y en el Dock).
+      document.title = `${rem <= 0 ? 'Tiempo cumplido' : running ? formatClock(rem) : `En pausa (${formatClock(rem)})`} · Sesión · Mi francés`;
     };
     paint();
     interval = setInterval(paint, 1000);
-    main.append(box, phases);
+    side.append(box, phases);
   }
 
   // Paso del plan: tareas para marcar
   const step = s.stepId ? data.steps.find((x) => x.id === s.stepId) : null;
   if (step) {
-    main.append(
+    side.append(
       section(
         'Paso del plan',
         h('p', { class: 'item-title', text: step.title }),
@@ -221,7 +228,7 @@ function renderSession(main, ctx, id) {
   // Objetivo y referencia
   const summary = h('summary', {}, h('span', { class: 'summary-title', text: 'Objetivo y referencia' }), h('span', { class: 'summary-meta', text: [objectiveTitle(data, s.objectiveId) || 'Sin objetivo', refText(s.ref)].filter(Boolean).join(' · ') }));
   const criterion = data.objectives.find((o) => o.id === s.objectiveId)?.description.trim();
-  main.append(
+  work.append(
     h('details', { class: 'card', open: !s.objectiveId && !refText(s.ref) },
       summary,
       objectivePicker(data, s.objectiveId, (v) => edit('objetivo', (x) => (x.objectiveId = v)), { id: 'ses-objetivo' }),
@@ -283,7 +290,7 @@ function renderSession(main, ctx, id) {
     toast((await copyText(text)) ? 'Consigna de corrección copiada' : 'No se pudo copiar.');
   };
 
-  main.append(
+  work.append(
     section(
       'Tu trabajo',
       area('draft', 'Borrador', 'Ideas, vocabulario, esquema. No tiene que estar bien.', 'borrador'),
@@ -299,7 +306,7 @@ function renderSession(main, ctx, id) {
     ),
   );
 
-  main.append(
+  work.append(
     section(
       'Para repasar',
       h('p', { class: 'hint', text: 'Guarda expresiones o errores de esta sesión. Aparecerán en Repaso a partir de mañana.' }),
@@ -364,9 +371,9 @@ function renderSession(main, ctx, id) {
       }, 'secondary'),
     );
   }
-  main.append(closing);
+  work.append(closing);
 
-  main.append(
+  work.append(
     h('div', { class: 'row-actions spaced' },
       button('Preparar conversación con este objetivo', () => ctx.go(`#/conversacion/${createConversation(ctx, { objectiveId: s.objectiveId, ref: s.ref, sessionId: id })}`), 'secondary'),
       button('Copiar como texto', async () => toast((await copyText(sessionAsText(get(), ctx.sync.data))) ? 'Sesión copiada como texto' : 'No se pudo copiar.'), 'secondary'),
@@ -380,6 +387,13 @@ function renderSession(main, ctx, id) {
       }, 'danger'),
     ),
   );
+
+  if (side.childElementCount) {
+    main.classList.add('wide');
+    main.append(h('div', { class: 'two-pane' }, side, work));
+  } else {
+    main.append(...work.childNodes);
+  }
 
   return () => clearInterval(interval);
 }

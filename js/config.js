@@ -4,7 +4,7 @@
 // cambiar algo básico (por ejemplo, la zona horaria), es aquí.
 // ─────────────────────────────────────────────────────────────
 
-export const APP_VERSION = '1.0.0';
+export const APP_VERSION = '1.1.0';
 
 // Repositorio PRIVADO donde se guardan tus datos (se puede cambiar en Ajustes).
 export const DEFAULT_REPO = 'jhsbb24/frances-datos';
@@ -23,7 +23,7 @@ export const REVIEW_INTERVALS = [1, 3, 7, 14];
 const testing = globalThis.__MI_FRANCES_PRUEBAS__ || {};
 export const TIMING = {
   saveDelay: testing.saveDelay ?? 3000, // espera después de dejar de escribir
-  minGap: testing.minGap ?? 10000, // tiempo mínimo entre dos guardados en GitHub
+  minGap: testing.minGap ?? 20000, // tiempo mínimo entre dos guardados en GitHub mientras escribes (al cambiar de pantalla o salir, se guarda ya)
   retry: testing.retry ?? 30000, // reintento cuando no hay conexión
   timeout: testing.timeout ?? 20000, // tiempo máximo de espera a GitHub
 };
