@@ -11,6 +11,7 @@ export const COLLECTIONS = [
   { key: 'conversations', label: 'Conversaciones' },
   { key: 'references', label: 'Biblioteca' },
   { key: 'cards', label: 'Tarjetas de repaso' },
+  { key: 'steps', label: 'Plan de estudio' },
 ];
 
 /** JSON con las claves ordenadas, para comparar sin importar el orden. */

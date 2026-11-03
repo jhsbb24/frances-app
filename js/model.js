@@ -10,12 +10,12 @@
 //   cards:         tarjetas de repaso
 // }
 // ─────────────────────────────────────────────────────────────
-import { BOOKS, DURATIONS, SKILLS, STATUSES, DIFFICULTIES, SESSION_PLAN } from './config.js';
+import { BOOKS, DURATIONS, SKILLS, STATUSES, DIFFICULTIES, SESSION_PLAN, STEP_TYPES } from './config.js';
 import { formatShort } from './dates.js';
 import { firstDue } from './review.js';
 
 export const SCHEMA_VERSION = 1;
-const COLLECTION_KEYS = ['objectives', 'sessions', 'conversations', 'references', 'cards'];
+export const COLLECTION_KEYS = ['objectives', 'sessions', 'conversations', 'references', 'cards', 'steps'];
 
 export function newId(prefix) {
   const bytes = new Uint8Array(5);
@@ -37,6 +37,7 @@ export function emptyData() {
     conversations: [],
     references: [],
     cards: [],
+    steps: [], // plan de estudio (pasos ordenados)
   };
 }
 
@@ -48,7 +49,7 @@ export function newObjective({ title, skill, description = '' }, now = nowIso())
   return { id: newId('obj'), createdAt: now, updatedAt: now, title, skill, description, status: 'pendiente', history: [] };
 }
 
-export function newSession({ minutes, objectiveId, ref }, now = nowIso()) {
+export function newSession({ minutes, objectiveId, ref, stepId = '' }, now = nowIso()) {
   return {
     id: newId('ses'),
     createdAt: now,
@@ -63,6 +64,8 @@ export function newSession({ minutes, objectiveId, ref }, now = nowIso()) {
     attempt2: '',
     closing: { achievement: '', difficulty: '', nextStep: '' },
     timer: { elapsedMs: 0, runningSince: now },
+    stepId, // paso del plan del que sale la sesión (si hay)
+    stepChecks: [], // tareas del paso que ya marcaste
   };
 }
 
@@ -243,6 +246,34 @@ function normSession(item) {
     attempt2: str(s.attempt2),
     closing: { achievement: str(closing.achievement), difficulty: str(closing.difficulty), nextStep: str(closing.nextStep) },
     timer: { elapsedMs: Math.max(0, Number(timer.elapsedMs) || 0), runningSince: iso(timer.runningSince) },
+    stepId: str(s.stepId),
+    stepChecks: arr(s.stepChecks).filter((n) => Number.isInteger(n) && n >= 0),
+  };
+}
+
+const STEP_TYPE_IDS = STEP_TYPES.map((t) => t.id);
+
+function normStep(item) {
+  const s = base(item);
+  if (!s) return null;
+  const conv = isObj(s.conversation) ? s.conversation : null;
+  return {
+    ...s,
+    order: Number.isFinite(Number(s.order)) ? Number(s.order) : 0,
+    book: oneOf(s.book, BOOKS, 'B1'),
+    unit: str(s.unit),
+    unitTitle: str(s.unitTitle),
+    title: str(s.title),
+    pages: str(s.pages),
+    minutes: DURATIONS.includes(Number(s.minutes)) ? Number(s.minutes) : 30,
+    instructions: arr(s.instructions)
+      .map((i) => (isObj(i) ? { type: oneOf(i.type, STEP_TYPE_IDS, 'nota'), text: str(i.text) } : { type: 'nota', text: str(i) }))
+      .filter((i) => i.text),
+    audio: str(s.audio),
+    objectiveIds: arr(s.objectiveIds).map(str).filter(Boolean),
+    conversation: conv ? { role: str(conv.role), expr1: str(conv.expr1), expr2: str(conv.expr2) } : null,
+    doneAt: iso(s.doneAt),
+    sessionId: str(s.sessionId),
   };
 }
 
@@ -306,6 +337,7 @@ const NORMALIZERS = {
   conversations: normConversation,
   references: normReference,
   cards: normCard,
+  steps: normStep,
 };
 
 /**
@@ -343,5 +375,45 @@ export function countData(data) {
     conversations: data.conversations.length,
     references: data.references.length,
     cards: data.cards.length,
+    steps: data.steps.length,
   };
+}
+
+// ── Plan de estudio ───────────────────────────────────────────
+
+export const sortedSteps = (data) => [...data.steps].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+
+/** El primer paso del plan que aún no está hecho. */
+export const nextStep = (data) => sortedSteps(data).find((s) => !s.doneAt) || null;
+
+/** Lo que define un paso (sin tu progreso), para saber si cambió. */
+const stepContent = (s) => JSON.stringify([s.order, s.book, s.unit, s.unitTitle, s.title, s.pages, s.minutes, s.instructions, s.audio, s.objectiveIds, s.conversation]);
+
+/**
+ * Añade a tus datos lo que trae un archivo, sin borrar nada.
+ * Lo que ya tienes se queda como está; en los pasos del plan se
+ * actualiza el texto, pero se conserva tu progreso (hecho / sesión).
+ */
+export function addMissing(current, incoming) {
+  const data = clone(current);
+  const added = {};
+  let updated = 0;
+  for (const key of COLLECTION_KEYS) {
+    added[key] = 0;
+    const position = new Map(data[key].map((item, i) => [item.id, i]));
+    for (const item of incoming[key]) {
+      if (!position.has(item.id)) {
+        data[key].push(clone(item));
+        added[key] += 1;
+      } else if (key === 'steps') {
+        const i = position.get(item.id);
+        const mine = data.steps[i];
+        if (stepContent(mine) !== stepContent(item)) {
+          data.steps[i] = { ...clone(item), doneAt: mine.doneAt, sessionId: mine.sessionId };
+          updated += 1;
+        }
+      }
+    }
+  }
+  return { data, added, updated };
 }

@@ -10,6 +10,7 @@ import { local, detectDevice } from '../local.js';
 import { suggestObjective, latestNextStep } from '../insights.js';
 import { byUpdatedDesc, byCreatedDesc, short } from '../components.js';
 import { createConversation } from './conversacion.js';
+import { nextStepCard } from './plan.js';
 
 const isInstalled = () => window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone === true;
 
@@ -21,6 +22,7 @@ function firstSteps(ctx) {
   const steps = [
     { done: ctx.sync.api.isConfigured(), text: 'Conectar la app con GitHub (token)', href: '#/ajustes' },
     phone ? { done: isInstalled(), text: 'Agregarla a la pantalla de inicio (Compartir → Agregar a inicio)', href: '#/ayuda', optional: true } : null,
+    { done: data.steps.length > 0, text: 'Cargar tu plan de estudio de Édito', href: '#/plan' },
     { done: data.objectives.length > 0, text: 'Crear tu primer objetivo', href: '#/objetivos' },
     { done: data.references.length > 0, text: 'Añadir una referencia de Édito a la Biblioteca', href: '#/biblioteca' },
     { done: data.sessions.length > 0, text: 'Hacer tu primera sesión', href: '#/sesion/nueva' },
@@ -53,6 +55,10 @@ export function render(main, ctx) {
   const steps = firstSteps(ctx);
   if (steps) main.append(steps);
 
+  // ── Plan de estudio ──
+  const hasPlan = data.steps.length > 0;
+  if (hasPlan) main.append(nextStepCard(ctx, { title: 'Tu plan de estudio' }));
+
   // ── Sesión ──
   const open = data.sessions.filter((s) => !s.closedAt).sort(byUpdatedDesc);
   const sesSection = section('Sesión de estudio');
@@ -81,7 +87,7 @@ export function render(main, ctx) {
     );
   }
 
-  const suggestion = suggestObjective(data, t);
+  const suggestion = hasPlan ? null : suggestObjective(data, t);
   if (suggestion) {
     const { objective, days } = suggestion;
     const when = days === null ? 'Todavía no lo has practicado.' : days === 0 ? 'Lo practicaste hoy.' : days === 1 ? 'Lo practicaste ayer.' : `Lo practicaste por última vez hace ${days} días.`;

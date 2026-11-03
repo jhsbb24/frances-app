@@ -117,6 +117,7 @@ En el iPhone en vertical, la barra de abajo tiene **Hoy, Sesión, Conversar, Rep
 | Pantalla | Para qué sirve |
 | --- | --- |
 | **Hoy** | Continuar la sesión abierta, empezar una nueva y ver los repasos de hoy. También: **primeros pasos** (mientras empiezas), tu **siguiente paso** más reciente (de una sesión o de un REGISTRO), una **sugerencia** del objetivo que hace más tiempo que no practicas y la conversación que espera su REGISTRO. |
+| **Plan** | Tu **plan de estudio** paso a paso: unidad, página, documento, actividades y audio de Édito. «Empezar este paso» abre una sesión ya preparada con las tareas para marcar; al **terminar la sesión**, el paso queda hecho y el plan avanza. Algunos pasos son de conversación, con rol y expresiones listos. (En el iPhone: **Más → Plan de estudio**; el próximo paso aparece siempre en **Hoy**.) |
 | **Sesión** | Eliges **15, 30 o 40 minutos** y un **objetivo**; anotas la **referencia de Édito** (libro, unidad, página, nota; se copia la de tu última sesión). Debajo del cronómetro hay un **plan sugerido por fases**. Escribes **borrador y primer intento**; con **Copiar consigna de corrección** ChatGPT te señala los errores sin reescribirte el texto; pegas su respuesta en **Correcciones** y conviertes las líneas «lo que escribí → forma correcta» en **tarjetas** con un toque. Luego, **segundo intento** y **cierre** de 3 campos (logro, dificultad, siguiente paso), con un botón para **cambiar el estado del objetivo** usando el logro como motivo. **Pausar y salir** guarda todo; **Copiar como texto** sirve para compartir la sesión. Hay buscador en la lista de sesiones. |
 | **Conversación** | Arma la **consigna para ChatGPT** con una plantilla (objetivo, criterio de logro, tipo de práctica según la habilidad, rol, dificultad, referencia, dos expresiones, errores a repasar y el significado de los estados). Puedes editarla antes de **Copiar consigna** y **Abrir ChatGPT**. Al volver, pega el **REGISTRO**: se guarda tal cual. La app te **propone** cambiar el estado, crear tarjetas, **pasar logro/prioridad/siguiente práctica al cierre de la sesión** o **repetir la práctica** con la prioridad como error a repasar, pero **no cambia nada hasta que confirmas**. Hay buscador. |
 | **Biblioteca** | Tus referencias de Édito B1 y B2: edición, unidad, página, enlace de audio y notas. Con buscador, cuántas veces usaste cada una y **Empezar sesión** con esa referencia. |
@@ -125,6 +126,16 @@ En el iPhone en vertical, la barra de abajo tiene **Hoy, Sesión, Conversar, Rep
 | **Progreso** | Objetivos por habilidad y estado, últimas evidencias, **dificultades y prioridades recientes**, **unidades de Édito trabajadas** y **actividad por semana** (solo recuentos). Con filtro por habilidad. No convierte minutos ni rachas en niveles MCER. |
 | **Ajustes** | Token, nombre del dispositivo, plantilla de la consigna, **Exportar JSON** e **Importar JSON** (con resumen antes de aplicar) y copias de seguridad. |
 | **Ayuda** | Una guía corta dentro de la app: rutina sugerida, cómo usar ChatGPT Voice, cómo corregir un texto y qué significa cada estado. |
+
+### Cargar el plan de estudio
+
+El plan de Édito no viene dentro de la app (se basa en tu libro, así que se guarda solo en tus datos privados). Se carga una vez con un archivo:
+
+1. Guarda el archivo del plan (por ejemplo `mi-frances-plan-edito-b1.json`) en tu Mac o en la app *Archivos* del iPhone/iPad.
+2. En la app: **Ajustes → Tus datos → Importar JSON** y elige el archivo.
+3. Revisa el resumen y pulsa **Añadir lo nuevo**. No se borra nada de lo que ya tienes, y si más adelante cargas una versión mejorada del plan, se actualizan los textos sin perder los pasos que ya hiciste.
+
+Basta con hacerlo en un aparato: el plan se guarda en GitHub y los demás aparatos lo reciben solos.
 
 **Los días de repaso** se cuentan siempre con la hora de **Vancouver** (`America/Vancouver`), aunque viajes o el dispositivo tenga otra zona horaria. Para cambiarla, edita `TIME_ZONE` en `js/config.js`.
 

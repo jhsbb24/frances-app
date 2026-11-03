@@ -9,6 +9,7 @@ import { newSession, newObjective, emptyRef, objectiveTitle, refText, remainingM
 import { buildPrompt, CORRECTION_TEMPLATE, objectiveValues, splitCorrections, plain } from '../registro.js';
 import { refEditor, objectivePicker, NEW_OBJECTIVE, cardQuickForm, byCreatedDesc, byUpdatedDesc, short, clip, notFound, CARD_KINDS, openCardDialog, openStatusDialog, openBulkCardsDialog } from '../components.js';
 import { createConversation } from './conversacion.js';
+import { stepLabel, instructionList, audioNote, methodBox, conversationFromStep } from './plan.js';
 
 export function render(main, ctx, params) {
   const [sub, ...rest] = params;
@@ -76,14 +77,22 @@ function renderNew(main, ctx, params) {
 
   let ref = emptyRef();
   let refHint = '';
+  let minutes = last?.minutes || 30;
   const libRef = what === 'referencia' && data.references.find((r) => r.id === preId);
-  if (libRef) {
+  // Desde el plan: objetivo, referencia y duración del paso.
+  const step = what === 'paso' && data.steps.find((x) => x.id === preId);
+  if (step) {
+    const first = step.objectiveIds.find((oid) => data.objectives.some((o) => o.id === oid));
+    if (first) objectiveId = first;
+    ref = { ...emptyRef(), book: step.book, unit: step.unit, page: step.pages, note: step.title };
+    minutes = step.minutes;
+  } else if (libRef) {
     ref = { ...emptyRef(), refId: libRef.id, book: libRef.book, unit: libRef.unit, page: libRef.page };
   } else if (last && refText(last.ref)) {
     ref = { ...emptyRef(), refId: last.ref.refId, book: last.ref.book, unit: last.ref.unit, page: last.ref.page };
     refHint = 'Copiada de tu última sesión. Cámbiala si hoy trabajas otra parte.';
   }
-  const form = { minutes: last?.minutes || 30, objectiveId, newObjective: null, ref };
+  const form = { minutes, objectiveId, newObjective: null, ref, stepId: step ? step.id : '' };
   const errorEl = h('p', { class: 'form-error', role: 'alert' });
 
   const start = () => {
@@ -98,7 +107,7 @@ function renderNew(main, ctx, params) {
       objective = newObjective({ title: form.newObjective.title.trim(), skill: form.newObjective.skill }, now);
       chosenId = objective.id;
     }
-    const session = newSession({ minutes: form.minutes, objectiveId: chosenId, ref: form.ref }, now);
+    const session = newSession({ minutes: form.minutes, objectiveId: chosenId, ref: form.ref, stepId: form.stepId }, now);
     ctx.sync.update(`Sesión del ${formatShort(now)}: empezar (${form.minutes} min)`, (d) => {
       if (objective) d.objectives.push(objective);
       d.sessions.push(session);
@@ -108,6 +117,9 @@ function renderNew(main, ctx, params) {
 
   main.append(
     h('h1', { text: 'Nueva sesión' }),
+    step
+      ? section('Paso del plan', h('p', { class: 'item-title', text: step.title }), h('p', { class: 'item-meta', text: stepLabel(step) }), instructionList(step), audioNote(step))
+      : null,
     section(
       null,
       groupLabel('¿Cuánto tiempo?', chips(DURATIONS.map((m) => ({ value: m, label: `${m} min` })), form.minutes, (v) => (form.minutes = v), { label: 'Duración' })),
@@ -180,6 +192,30 @@ function renderSession(main, ctx, id) {
     paint();
     interval = setInterval(paint, 1000);
     main.append(box, phases);
+  }
+
+  // Paso del plan: tareas para marcar
+  const step = s.stepId ? data.steps.find((x) => x.id === s.stepId) : null;
+  if (step) {
+    main.append(
+      section(
+        'Paso del plan',
+        h('p', { class: 'item-title', text: step.title }),
+        h('p', { class: 'item-meta', text: stepLabel(step) }),
+        instructionList(step, {
+          checks: s.stepChecks,
+          onToggle: (i, on) =>
+            edit('tarea del plan', (x) => {
+              x.stepChecks = on ? [...new Set([...x.stepChecks, i])].sort((a, b) => a - b) : x.stepChecks.filter((n) => n !== i);
+            }),
+        }),
+        audioNote(step),
+        methodBox(step),
+        h('p', { class: 'hint', text: s.closedAt ? '' : 'Al pulsar «Terminar sesión», este paso quedará hecho en el plan.' }),
+        step.conversation ? button('Preparar la conversación de este paso', () => ctx.go(`#/conversacion/${conversationFromStep(ctx, step)}`), 'secondary small') : null,
+        h('a', { class: 'link', href: `#/plan/${step.id}`, text: 'Ver el paso en el plan' }),
+      ),
+    );
   }
 
   // Objetivo y referencia
@@ -303,11 +339,14 @@ function renderSession(main, ctx, id) {
     closing.append(
       h('div', { class: 'row-actions' },
         button('Terminar sesión', () => {
-          edit('terminar', (x) => {
+          edit('terminar', (x, d) => {
             pauseTimer(x);
             x.closedAt = nowIso();
+            // Si viene del plan, el paso queda hecho.
+            const planStep = x.stepId && d.steps.find((y) => y.id === x.stepId);
+            if (planStep && !planStep.doneAt) Object.assign(planStep, { doneAt: x.closedAt, sessionId: x.id, updatedAt: x.closedAt });
           });
-          toast('Sesión terminada');
+          toast(step && !step.doneAt ? 'Sesión terminada · paso del plan hecho' : 'Sesión terminada');
           ctx.go('#/hoy');
         }, 'primary'),
         button('Pausar y salir', () => {

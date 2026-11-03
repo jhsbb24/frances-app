@@ -5,7 +5,7 @@
 // versión más nueva; si no, usa la copia guardada.
 // NUNCA toca las peticiones a GitHub (api.github.com).
 // ─────────────────────────────────────────────────────────────
-const CACHE = 'mi-frances-v2';
+const CACHE = 'mi-frances-v3';
 
 const APP_FILES = [
   './',
@@ -37,6 +37,7 @@ const APP_FILES = [
   'js/views/hoy.js',
   'js/views/mas.js',
   'js/views/objetivos.js',
+  'js/views/plan.js',
   'js/views/progreso.js',
   'js/views/repaso.js',
   'js/views/sesion.js',

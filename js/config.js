@@ -54,6 +54,26 @@ export const PRACTICE_MODES = {
 
 export const DURATIONS = [15, 30, 40];
 
+// Tipos de tarea de un paso del plan, con el método para trabajarlas.
+export const STEP_TYPES = [
+  { id: 'escucha', label: 'Escucha', method: '1.ª escucha sin mirar las preguntas: ¿quién habla, dónde y de qué? Lee las preguntas y escucha otra vez para responder. Comprueba con la transcripción del libro y escucha una última vez leyéndola.' },
+  { id: 'video', label: 'Vídeo', method: 'Míralo una vez entero sin pausa. Lee las preguntas y míralo otra vez, parando cuando lo necesites.' },
+  { id: 'lee', label: 'Lee', method: '1.ª lectura rápida: tipo de texto e idea general. 2.ª lectura para responder. Subraya las palabras nuevas, pero no traduzcas todo.' },
+  { id: 'habla', label: 'Habla', method: 'Anota 3 o 4 ideas sueltas en «Borrador» (no frases). Habla en voz alta 1 o 2 minutos sin leer (puedes grabarte con el móvil). Escribe en «Primer intento» tus mejores frases; revisa y vuelve a decirlo («Segundo intento»).' },
+  { id: 'escribe', label: 'Escribe', method: 'Escribe el «Primer intento» sin diccionario. Pide la corrección con «Copiar consigna de corrección» y escribe el «Segundo intento». En las tareas tipo DELF, unas 160 palabras.' },
+  { id: 'gramatica', label: 'Gramática', method: 'Haz «Échauffement», lee «Fonctionnement» y escribe la regla con tus palabras en «Borrador». Haz «Entraînement». Crea tarjetas con las frases en las que dudaste.' },
+  { id: 'vocabulario', label: 'Vocabulario', method: 'Haz los ejercicios. Elige de 5 a 10 palabras útiles para ti y crea tarjetas en «Para repasar».' },
+  { id: 'fonetica', label: 'Fonética', method: 'Escucha, repite en voz alta y exagera un poco. Grábate y compara si puedes.' },
+  { id: 'cultura', label: 'Cultura', method: 'Léelo con calma: es contexto cultural, no hace falta memorizarlo.' },
+  { id: 'extra', label: 'Extra', method: 'Opcional: hazlo si te sobra tiempo o te interesa el tema.' },
+  { id: 'repaso', label: 'Repaso', method: 'Hazlo sin mirar las páginas anteriores; después corrige y anota en el cierre lo que aún te cuesta.' },
+  { id: 'taller', label: 'Taller', method: 'Está pensado para hacerlo en grupo: hazlo con ChatGPT como compañero o compañera, o por escrito.' },
+  { id: 'delf', label: 'DELF', method: 'Hazlo como en el examen: con cronómetro, sin diccionario y sin pausas. Corrígelo después.' },
+  { id: 'conversacion', label: 'Conversación', method: 'Toca «Preparar conversación»: la consigna ya trae el rol y las expresiones. Habla con ChatGPT Voice y pega el REGISTRO al terminar.' },
+  { id: 'nota', label: 'Nota', method: '' },
+];
+export const stepType = (id) => STEP_TYPES.find((t) => t.id === id) || STEP_TYPES[STEP_TYPES.length - 1];
+
 // Plan sugerido de una sesión (minutos de cada fase). Es solo una guía.
 export const SESSION_PLAN = {
   15: [['Borrador', 3], ['Primer intento', 5], ['Revisar', 3], ['Segundo intento', 3], ['Cierre', 1]],
