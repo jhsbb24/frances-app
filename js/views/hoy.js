@@ -51,13 +51,19 @@ export function render(main, ctx) {
   const data = ctx.sync.data;
   const t = today();
   main.append(h('h1', { text: 'Hoy' }), h('p', { class: 'subtitle', text: capitalize(formatDay(t)) }));
-
-  const steps = firstSteps(ctx);
-  if (steps) main.append(steps);
+  // En el Mac: a la izquierda el plan y la sesión; a la derecha repasos y
+  // conversación. En el iPhone, todo en una columna, en ese orden.
+  const primary = h('div', { class: 'pane-main' });
+  const aside = h('div', { class: 'pane-side' });
+  main.classList.add('wide');
+  main.append(h('div', { class: 'two-pane main-first' }, primary, aside));
 
   // ── Plan de estudio ──
   const hasPlan = data.steps.length > 0;
-  if (hasPlan) main.append(nextStepCard(ctx, { title: 'Tu plan de estudio' }));
+  const steps = firstSteps(ctx);
+  // Sin plan, los primeros pasos van arriba; con plan, al final (ya casi están hechos).
+  if (steps && !hasPlan) primary.append(steps);
+  if (hasPlan) primary.append(nextStepCard(ctx, { title: 'Tu plan de estudio' }));
 
   // ── Sesión ──
   const open = data.sessions.filter((s) => !s.closedAt).sort(byUpdatedDesc);
@@ -74,7 +80,9 @@ export function render(main, ctx) {
       ),
     );
   }
-  sesSection.append(linkButton(open.length ? 'Empezar otra sesión' : 'Empezar una sesión nueva', '#/sesion/nueva', open.length ? 'secondary block' : 'primary big block'));
+  // Con plan, el botón principal es «Empezar este paso»; esta es la sesión libre.
+  const freeLabel = hasPlan ? 'Sesión libre (fuera del plan)' : open.length ? 'Empezar otra sesión' : 'Empezar una sesión nueva';
+  sesSection.append(linkButton(freeLabel, '#/sesion/nueva', open.length || hasPlan ? 'secondary block' : 'primary big block'));
 
   const next = latestNextStep(data);
   if (next) {
@@ -103,7 +111,7 @@ export function render(main, ctx) {
       ),
     );
   }
-  main.append(sesSection);
+  primary.append(sesSection);
 
   // ── Conversaciones esperando el registro ──
   const waiting = data.conversations.filter((c) => !c.registro.trim() && diffDays(today(new Date(c.createdAt)), t) <= 7).sort(byCreatedDesc);
@@ -119,9 +127,9 @@ export function render(main, ctx) {
         ),
       );
     }
-    main.append(conv);
+    aside.append(conv);
   } else {
-    main.append(
+    aside.append(
       section(
         'Conversación',
         h('p', { text: 'Prepara una consigna para practicar con ChatGPT Voice.' }),
@@ -151,5 +159,6 @@ export function render(main, ctx) {
       rev.append(h('p', { class: 'hint', text: `${overdue.length} ${overdue.length === 1 ? 'es' : 'son'} de días anteriores. No hace falta hacerlas todas hoy: puedes reprogramarlas en Repaso.` }), linkButton('Reprogramar', '#/repaso', 'secondary'));
     }
   }
-  main.append(rev);
+  aside.prepend(rev);
+  if (steps && hasPlan) aside.append(steps);
 }

@@ -15,7 +15,7 @@ const { dayKey, today, addDays } = await import('../js/dates.js');
 const { schedule, applyAnswer, dueCards, overdueCards, planReschedule, firstDue, compareAnswer } = await import('../js/review.js');
 const { newCard, newSession, newReference, newObjective, newConversation, emptyData, normalizeData, clone, currentPhase, sessionAsText, nextStep, addMissing } = await import('../js/model.js');
 const { parseRegistro, buildPrompt, DEFAULT_TEMPLATE, CORRECTION_TEMPLATE, REGISTRO_FIELDS, splitExpressions, splitCorrections, matchStatus, objectiveValues, statusDefinitions } = await import('../js/registro.js');
-const { suggestObjective, latestNextStep, weekStart, weeklyActivity, unitsWorked, referenceUsage, recentDifficulties, lastActivity } = await import('../js/insights.js');
+const { suggestObjective, latestNextStep, weekStart, weeklyActivity, unitsWorked, referenceUsage, recentDifficulties, lastActivity, planProgress } = await import('../js/insights.js');
 const { readFileSync, readdirSync } = await import('node:fs');
 const { createGitHubApi, encodeBase64, decodeBase64, maskToken, parseRepo } = await import('../js/github.js');
 const { SyncEngine, buildCommitMessage } = await import('../js/sync.js');
@@ -274,6 +274,53 @@ describe('Cliente de la API de GitHub (con GitHub falso)', () => {
     await assert.rejects(api.writeFile('b', 'sha-viejo', 'dos'), (e) => e.kind === 'conflict');
     await assert.rejects(api.writeFile('b', null, 'dos'), (e) => e.kind === 'conflict');
     assert.equal(fake.file.text, 'a');
+  });
+
+  test('si el archivo no cambió, GitHub responde 304 y no se descarga otra vez (ETag)', async () => {
+    const fake = createFakeGitHub();
+    const api = apiFor(fake);
+    fake.setRemote('{"v":1}\n');
+    const first = await api.readFile();
+    assert.equal(fake.notModified, 0);
+    const again = await api.readFile();
+    assert.deepEqual(again, first);
+    assert.equal(fake.notModified, 1, 'la segunda lectura fue un 304');
+    // Otro dispositivo guarda: la siguiente lectura trae la versión nueva.
+    fake.setRemote('{"v":2}\n');
+    const changed = await api.readFile();
+    assert.equal(changed.text, '{"v":2}\n');
+    assert.notEqual(changed.sha, first.sha);
+    assert.equal(fake.notModified, 1);
+    // Y tras un guardado propio, se lee lo guardado (no la copia anterior).
+    const { sha } = await api.writeFile('{"v":3}\n', changed.sha, 'tres');
+    assert.equal((await api.readFile()).sha, sha);
+  });
+
+  test('si la pregunta «¿cambió?» falla, se pide el archivo entero; sin ETag funciona igual', async () => {
+    const fake = createFakeGitHub();
+    fake.setRemote('{"v":1}\n');
+    let failNextConditional = false;
+    const api = createGitHubApi({
+      getToken: () => TOKEN,
+      getRepo: () => REPO,
+      fetchFn: async (url, opts) => {
+        if (failNextConditional && opts.headers['If-None-Match']) {
+          failNextConditional = false;
+          throw new TypeError('Load failed');
+        }
+        return fake.fetch(url, opts);
+      },
+    });
+    await api.readFile();
+    failNextConditional = true;
+    assert.equal((await api.readFile()).text, '{"v":1}\n');
+    const noEtag = createFakeGitHub();
+    noEtag.etags = false;
+    noEtag.setRemote('{"x":1}\n');
+    const plainApi = apiFor(noEtag);
+    await plainApi.readFile();
+    assert.equal((await plainApi.readFile()).text, '{"x":1}\n');
+    assert.equal(noEtag.notModified, 0);
   });
 
   test('token malo → error de token; sin conexión → error de red', async () => {
@@ -590,6 +637,26 @@ describe('Sin conexión', () => {
 });
 
 describe('Ayudas para orientarte (insights)', () => {
+  test('avance del plan: por unidad y ritmo según las semanas que llevas (no siempre 4)', () => {
+    const d = emptyData();
+    const step = (id, unit, order, doneAt = null) => ({ id, book: 'B1', unit, unitTitle: `U${unit}`, order, doneAt });
+    // 6 pasos hechos en los últimos 10 días (en Vancouver), 2 sin hacer.
+    d.steps = [
+      step('p1', '1', 10, '2026-10-24T18:00:00Z'), step('p2', '1', 20, '2026-10-26T18:00:00Z'), step('p3', '1', 30, '2026-10-28T18:00:00Z'),
+      step('p4', '2', 40, '2026-10-30T18:00:00Z'), step('p5', '2', 50, '2026-11-01T18:00:00Z'), step('p6', '2', 60, '2026-11-02T18:00:00Z'),
+      step('p7', '2', 70), step('p8', '3', 80),
+    ];
+    const p = planProgress(d, '2026-11-02');
+    assert.equal(p.total, 8);
+    assert.equal(p.done, 6);
+    assert.deepEqual(p.units.map((u) => `${u.unit}:${u.done}/${u.total}`), ['1:3/3', '2:3/4', '3:0/1']);
+    assert.equal(p.perWeek, 3, '6 pasos en 2 semanas, no en 4');
+    assert.equal(p.weeksLeft, 1);
+    assert.equal(planProgress(emptyData(), '2026-11-02').perWeek, 0);
+    const week = weeklyActivity(d, '2026-11-02', 2);
+    assert.equal(week[0].steps + week[1].steps, 5, 'pasos del plan por semana (lunes a domingo)');
+  });
+
   function data() {
     const d = emptyData();
     const a = newObjective({ title: 'A', skill: 'oral' }, '2026-10-01T10:00:00Z');

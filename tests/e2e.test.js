@@ -664,7 +664,7 @@ describe('Ayudas para estudiar', () => {
     await page.goto(`${server.url}/#/biblioteca`);
     await waitStatus(page, /^Guardado en GitHub/);
     assert.match(await page.locator('main').innerText(), /Usada en 1 sesión y 1 conversación/);
-    await page.locator('.ref-card', { hasText: 'Unidad 3' }).getByRole('link', { name: 'Empezar sesión' }).click();
+    await page.locator('details.unit', { hasText: 'Unidad 3' }).getByRole('link', { name: 'Empezar sesión' }).click();
     await page.waitForSelector('#nueva-unidad');
     assert.equal(await page.inputValue('#nueva-unidad'), '3');
     assert.equal(await page.inputValue('#nueva-pagina'), '42');
@@ -770,6 +770,116 @@ describe('Plan de estudio', () => {
     assert.equal(first.title, 'Escuchar y hablar (versión mejorada)');
     assert.equal(first.doneAt, '2026-11-02T10:00:00.000Z', 'lo hecho se conserva');
     assert.match(fake.commits.at(-1).message, /^Añadir desde JSON/);
+    assert.deepEqual(dev.errors, []);
+    await dev.context.close();
+  });
+});
+
+describe('Mac (pantalla ancha) y plan completo', () => {
+  /** Plan de prueba con fichas de Biblioteca y objetivos por unidad, como el plan real. */
+  function planData() {
+    const { data, ids } = withPlan(sampleData());
+    const t0 = '2026-11-01T00:00:00.000Z';
+    const ref = (id, unit, page, notes) => ({ id, createdAt: t0, updatedAt: t0, book: 'B1', edition: '3.ª edición', unit, page, audioUrl: '', notes });
+    data.references.push(
+      ref('ref-b1-p012-audio-1', '1', '12', 'Audio: Documento A: una cantante habla de su infancia'),
+      ref('ref-b1-p014-gramatica-1', '1', '14', 'Gramática: Le passé composé et l’imparfait'),
+      ref('ref-b1-p028-vocabulario-1', '2', '28', 'Vocabulario: La politesse'),
+      // Muchas fichas (como el plan real): solo se abre la unidad en la que vas.
+      ...Array.from({ length: 18 }, (_, i) => ref(`ref-b1-p0${50 + i}-audio-1`, '4', String(50 + i), `Audio: Documento ${i + 1}`)),
+    );
+    const obj = (id, title, skill) => ({ id, createdAt: t0, updatedAt: t0, title, skill, description: '', status: 'pendiente', history: [] });
+    data.objectives.push(obj('obj-b1-u01-oral', 'U1 · Hablar de mi familia', 'oral'), obj('obj-b1-u02-oral', 'U2 · Pedir con cortesía', 'oral'));
+    return { data, ids };
+  }
+
+  test('Hoy y la sesión a dos columnas; el tiempo en el título; Biblioteca, Objetivos y Progreso con el plan; lecturas con 304', async () => {
+    const { data } = planData();
+    const fake = createFakeGitHub();
+    fake.setRemote(serialize(data));
+    const dev = await openDevice(fake, 'mac');
+    const { page } = dev;
+    await page.goto(`${server.url}/#/hoy`);
+    await waitStatus(page, /^Guardado en GitHub/);
+
+    // Sin cambios, volver a la app solo pregunta «¿cambió?» (304, sin descargar).
+    await page.waitForTimeout(5200);
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await waitFor(() => fake.notModified >= 1);
+    await waitStatus(page, /^Guardado en GitHub/);
+
+    // Hoy: el plan a la izquierda, repasos y conversación a la derecha.
+    const left = await page.locator('.pane-main').boundingBox();
+    const right = await page.locator('.pane-side').boundingBox();
+    assert.ok(right.x > left.x + left.width - 1, 'dos columnas en Hoy');
+    assert.equal(await page.locator('.pane-main').getByRole('heading', { name: 'Tu plan de estudio' }).count(), 1);
+    assert.equal(await page.locator('.pane-side').getByRole('heading', { name: 'Repasos de hoy' }).count(), 1);
+    assert.equal(await page.getByRole('link', { name: 'Sesión libre (fuera del plan)' }).count(), 1);
+    await shot(page, 'mac-hoy-dos-columnas');
+
+    // Sesión de un paso: cronómetro y tareas fijos a la izquierda.
+    await page.getByRole('link', { name: 'Empezar este paso' }).click();
+    await page.getByRole('button', { name: 'Empezar', exact: true }).click();
+    await page.getByRole('heading', { name: 'Paso del plan' }).waitFor();
+    const side = page.locator('.pane-side');
+    assert.equal(await side.locator('.timer').count(), 1);
+    assert.equal(await side.getByRole('heading', { name: 'Paso del plan' }).count(), 1);
+    assert.equal(await page.locator('.pane-main').getByRole('heading', { name: 'Tu trabajo' }).count(), 1);
+    assert.equal(await side.evaluate((el) => getComputedStyle(el).position), 'sticky');
+    await page.waitForFunction(() => /^\d+:\d\d · Sesión · Mi francés$/.test(document.title));
+    await page.fill('#ses-attempt1', 'Quand j’étais petit, je jouais au foot.');
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    await page.waitForTimeout(100);
+    const timer = await side.locator('.timer').boundingBox();
+    assert.ok(timer.y >= 0 && timer.y < 900, 'el cronómetro sigue a la vista al bajar');
+    await shot(page, 'mac-sesion-dos-columnas');
+    await go(page, '#/hoy');
+    assert.equal(await page.evaluate(() => document.title), 'Hoy · Mi francés');
+
+    // Biblioteca: por unidades (abierta la del paso actual) y filtro por tipo.
+    await go(page, '#/biblioteca');
+    const unit1 = page.locator('details.unit', { hasText: 'Unidad 1 — Unidad de prueba' });
+    const unit2 = page.locator('details.unit', { hasText: 'Unidad 2' });
+    assert.equal(await unit1.evaluate((el) => el.open), true);
+    assert.equal(await unit2.evaluate((el) => el.open), false);
+    await page.getByRole('button', { name: 'Gramática', exact: true }).click();
+    assert.equal(await page.locator('.ref-row').count(), 1);
+    assert.match(await page.locator('main').innerText(), /1 de 23 fichas/);
+    await page.getByRole('button', { name: 'Todo', exact: true }).click();
+    await page.fill('#biblioteca-buscar', 'politesse');
+    assert.equal(await page.locator('.ref-row:visible').count(), 1, 'al buscar se abren las unidades');
+    await page.fill('#biblioteca-buscar', '');
+
+    // Objetivos: filtro por unidad.
+    await go(page, '#/objetivos');
+    await page.selectOption('#objetivos-unidad', '2');
+    const objs = await page.locator('main').innerText();
+    assert.match(objs, /U2 · Pedir con cortesía/);
+    assert.doesNotMatch(objs, /U1 · Hablar de mi familia/);
+    await page.selectOption('#objetivos-unidad', '');
+
+    // Progreso: avance del plan por unidad.
+    await go(page, '#/progreso');
+    assert.match(await page.locator('main').innerText(), /0 % · 0 de 3 pasos hechos/);
+    assert.equal(await page.locator('.unit-row').count(), 1);
+    assert.deepEqual(dev.errors, []);
+    await dev.context.close();
+  });
+
+  test('iPhone: en la Biblioteca los botones van debajo del texto (no lo estrujan)', async () => {
+    const { data } = planData();
+    const fake = createFakeGitHub();
+    fake.setRemote(serialize(data));
+    const dev = await openDevice(fake, 'iphoneSE');
+    const { page } = dev;
+    await page.goto(`${server.url}/#/biblioteca`);
+    await waitStatus(page, /^Guardado en GitHub/);
+    const row = page.locator('.ref-row').first();
+    const text = await row.locator('.item-main').boundingBox();
+    const actions = await row.locator('.row-actions').boundingBox();
+    assert.ok(text.width > 280, `texto con ${text.width}px`);
+    assert.ok(actions.y >= text.y + text.height - 1, 'los botones, debajo');
+    await shot(page, 'iphone-biblioteca');
     assert.deepEqual(dev.errors, []);
     await dev.context.close();
   });

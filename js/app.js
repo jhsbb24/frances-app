@@ -98,6 +98,7 @@ function renderRoute({ keepPosition = false } = {}) {
   }
   if (!keepPosition) closeTransientDialogs();
   main.replaceChildren();
+  main.classList.remove('wide'); // cada pantalla decide si usa todo el ancho (Mac)
   const route = ROUTES[name];
   try {
     cleanup = route.view(main, ctx, params) || null;
