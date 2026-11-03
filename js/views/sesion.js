@@ -172,7 +172,8 @@ function renderSession(main, ctx, id) {
       });
       paint();
     }, 'secondary');
-    const box = h('div', { class: 'timer' }, h('div', {}, time, state), toggle);
+    const progress = h('span', {});
+    const box = h('div', { class: 'timer' }, h('div', {}, time, state), toggle, h('div', { class: 'timer-progress', 'aria-hidden': 'true' }, progress));
     const plan = SESSION_PLAN[s.minutes] || SESSION_PLAN[30];
     const phaseItems = plan.map(([name, min]) => h('li', {}, h('span', { text: name }), h('small', { text: ` ${min} min` })));
     const phaseText = h('p', { class: 'hint' });
@@ -186,6 +187,7 @@ function renderSession(main, ctx, id) {
       state.textContent = rem <= 0 ? 'Tiempo cumplido. Puedes cerrar la sesión o seguir un poco.' : running ? 'En marcha' : 'En pausa';
       toggle.textContent = running ? 'Pausar' : 'Reanudar';
       box.classList.toggle('done', rem <= 0);
+      progress.style.width = `${Math.min(100, Math.round((elapsedMs(x) / (x.minutes * 60000)) * 1000) / 10)}%`;
       box.classList.toggle('paused', !running);
       const phase = currentPhase(x.minutes, elapsedMs(x) / 60000);
       phaseItems.forEach((li, i) => {
