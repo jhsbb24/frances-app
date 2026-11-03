@@ -759,7 +759,7 @@ describe('Plan de estudio', () => {
     const summary = await page.locator('.summary-table').innerText();
     assert.match(summary, /Plan de estudio\s+3\s+4\s+1/);
     assert.match(summary, /Objetivos\s+4\s+5\s+1/);
-    assert.match(await page.locator('dialog').innerText(), /actualiza 1 pasos del plan/);
+    assert.match(await page.locator('dialog').innerText(), /actualiza 1 del plan/);
     await shot(page, 'mac-importar-plan');
     await page.getByRole('button', { name: 'Añadir lo nuevo' }).click();
     await waitFor(() => fake.json().steps.length === 4);

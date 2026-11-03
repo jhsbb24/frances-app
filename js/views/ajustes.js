@@ -189,6 +189,7 @@ function confirmReplace(ctx, incoming, { title, origin, message, allowMerge = fa
   const meta = incoming.meta?.updatedAt ? `Último cambio en el archivo: ${formatDateTime(incoming.meta.updatedAt)}${incoming.meta.device ? ` (${incoming.meta.device})` : ''}.` : '';
   const merge = allowMerge ? addMissing(ctx.sync.data, incoming) : null;
   const newCount = merge ? Object.values(merge.added).reduce((n, x) => n + x, 0) : 0;
+  const oldCount = merge ? merge.removed.steps + merge.removed.references : 0;
   const actions = [{ label: 'Cancelar', class: 'secondary' }];
   actions.push({
     label: allowMerge ? 'Reemplazar todo' : 'Reemplazar mis datos',
@@ -204,12 +205,12 @@ function confirmReplace(ctx, incoming, { title, origin, message, allowMerge = fa
       label: 'Añadir lo nuevo',
       class: 'primary',
       onClick: () => {
-        if (!newCount && !merge.updated) {
+        if (!newCount && !merge.updated && !oldCount) {
           toast('No hay nada nuevo en el archivo');
           return;
         }
-        ctx.sync.replaceAll(merge.data, `${message.replace(/^Importar JSON/, 'Añadir desde JSON')}${merge.updated ? ` · ${merge.updated} pasos del plan actualizados` : ''}`);
-        toast(`Añadido: ${newCount} elementos nuevos${merge.updated ? `, ${merge.updated} pasos actualizados` : ''}`);
+        ctx.sync.replaceAll(merge.data, `${message.replace(/^Importar JSON/, 'Añadir desde JSON')}${merge.updated ? ` · ${merge.updated} elementos del plan actualizados` : ''}${oldCount ? ` · ${oldCount} antiguos quitados` : ''}`);
+        toast(`Añadido: ${newCount} elementos nuevos${merge.updated ? `, ${merge.updated} actualizados` : ''}`);
         ctx.rerender();
       },
     });
@@ -221,7 +222,9 @@ function confirmReplace(ctx, incoming, { title, origin, message, allowMerge = fa
       meta ? h('p', { class: 'hint', text: meta }) : null,
       summaryTable(ctx.sync.data, incoming, merge?.added),
       merge
-        ? h('p', { text: `«Añadir lo nuevo» suma ${newCount} elementos${merge.updated ? ` y actualiza ${merge.updated} pasos del plan (sin tocar los que ya hiciste)` : ''}. No borra nada de lo que ya tienes.` })
+        ? h('p', {
+            text: `«Añadir lo nuevo» suma ${newCount} elementos${merge.updated ? ` y actualiza ${merge.updated} del plan` : ''}${oldCount ? `, y quita ${oldCount} pasos o fichas antiguas del plan que ya no existen` : ''}. Lo que hiciste o editaste se conserva, y no borra nada tuyo.`,
+          })
         : null,
       h('p', { class: 'warning', text: `${merge ? '«Reemplazar todo» ' : 'Esto '}REEMPLAZA todos tus datos actuales por los del archivo. Antes guardo una copia de los actuales en este dispositivo, y la versión actual seguirá en el historial de GitHub.` }),
     ],

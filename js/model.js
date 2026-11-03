@@ -389,14 +389,24 @@ export const nextStep = (data) => sortedSteps(data).find((s) => !s.doneAt) || nu
 /** Lo que define un paso (sin tu progreso), para saber si cambió. */
 const stepContent = (s) => JSON.stringify([s.order, s.book, s.unit, s.unitTitle, s.title, s.pages, s.minutes, s.instructions, s.audio, s.objectiveIds, s.conversation]);
 
+/** Prefijo de los elementos que vienen de un plan («plan-b1-», «ref-b1-»…); null si los creaste tú. */
+const planPrefix = (id) => id.match(/^([a-z]+-[a-z0-9]+-)/i)?.[1] || null;
+
+/** ¿Sigue como vino del plan? (no lo hiciste ni lo editaste) */
+const untouched = (key, item) => (key === 'steps' ? !item.doneAt && !item.sessionId : item.updatedAt === item.createdAt);
+
 /**
- * Añade a tus datos lo que trae un archivo, sin borrar nada.
- * Lo que ya tienes se queda como está; en los pasos del plan se
- * actualiza el texto, pero se conserva tu progreso (hecho / sesión).
+ * Añade a tus datos lo que trae un archivo, sin borrar nada tuyo.
+ * Lo que ya tienes se queda como está. Con un plan nuevo:
+ * · los pasos y las fichas del plan se actualizan (se conserva lo
+ *   que hiciste y lo que editaste);
+ * · los pasos y fichas antiguos del mismo plan que ya no están en el
+ *   archivo se quitan, salvo si los hiciste o los editaste.
  */
 export function addMissing(current, incoming) {
   const data = clone(current);
   const added = {};
+  const removed = { steps: 0, references: 0 };
   let updated = 0;
   for (const key of COLLECTION_KEYS) {
     added[key] = 0;
@@ -412,8 +422,25 @@ export function addMissing(current, incoming) {
           data.steps[i] = { ...clone(item), doneAt: mine.doneAt, sessionId: mine.sessionId };
           updated += 1;
         }
+      } else if (key === 'references' && planPrefix(item.id)) {
+        const i = position.get(item.id);
+        const mine = data.references[i];
+        if (untouched(key, mine) && JSON.stringify([mine.notes, mine.page, mine.unit, mine.book]) !== JSON.stringify([item.notes, item.page, item.unit, item.book])) {
+          data.references[i] = clone(item);
+          updated += 1;
+        }
       }
     }
   }
-  return { data, added, updated };
+  for (const key of ['steps', 'references']) {
+    const ids = new Set(incoming[key].map((x) => x.id));
+    const prefixes = new Set(incoming[key].map((x) => planPrefix(x.id)).filter(Boolean));
+    data[key] = data[key].filter((item) => {
+      const prefix = planPrefix(item.id);
+      if (!prefix || !prefixes.has(prefix) || ids.has(item.id) || !untouched(key, item)) return true;
+      removed[key] += 1;
+      return false;
+    });
+  }
+  return { data, added, updated, removed };
 }

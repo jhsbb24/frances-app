@@ -737,6 +737,34 @@ describe('Plan de estudio', () => {
     assert.equal(addMissing(data, incoming).updated, 0, 'importar dos veces no cambia nada');
   });
 
+  test('al cargar una versión nueva del plan se quita lo antiguo que no tocaste', () => {
+    const ref = (id, notes, extra = {}) => ({ id, createdAt: '2026-11-01T00:00:00.000Z', updatedAt: '2026-11-01T00:00:00.000Z', book: 'B1', unit: '2', page: '27', notes, ...extra });
+    const mine = normalizeData({
+      app: 'mi-frances',
+      steps: [step('plan-b1-u02-01', 10, { doneAt: '2026-11-02T00:00:00.000Z' }), step('plan-b1-u02-02', 20), step('plan-b2-u01-01', 30)],
+      references: [
+        ref('ref-b1-u02-02-1', 'Audio: versión antigua'),
+        ref('ref-b1-u02-05-1', 'Gramática editada por mí', { updatedAt: '2026-11-03T00:00:00.000Z', audioUrl: 'https://example.com/a.mp3' }),
+        ref('ref-b1-p027-gramatica-1', 'Gramática: texto viejo'),
+        ref('ref_mia123', 'Mi propia ficha'),
+      ],
+    });
+    const incoming = normalizeData({
+      app: 'mi-frances',
+      steps: [step('plan-b1-u02-03', 40)],
+      references: [ref('ref-b1-p027-gramatica-1', 'Gramática: L’interrogation'), ref('ref-b1-p027-audio-1', 'Audio: Documento B')],
+    });
+    const { data, removed, updated } = addMissing(mine, incoming);
+    assert.deepEqual(data.steps.map((s) => s.id).sort(), ['plan-b1-u02-01', 'plan-b1-u02-03', 'plan-b2-u01-01'], 'se queda el hecho y el de otro plan');
+    assert.deepEqual(removed, { steps: 1, references: 1 });
+    assert.equal(updated, 1);
+    const ids = data.references.map((r) => r.id);
+    assert.ok(ids.includes('ref-b1-u02-05-1'), 'la ficha que editaste se conserva');
+    assert.ok(ids.includes('ref_mia123'), 'las fichas tuyas no se tocan');
+    assert.ok(!ids.includes('ref-b1-u02-02-1'));
+    assert.equal(data.references.find((r) => r.id === 'ref-b1-p027-gramatica-1').notes, 'Gramática: L’interrogation');
+  });
+
   test('una sesión recuerda su paso y las tareas marcadas', () => {
     const s = newSession({ minutes: 30, objectiveId: '', ref: {}, stepId: 'a' });
     s.stepChecks = [0, 2, -1, 'x'];
